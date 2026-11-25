@@ -301,7 +301,7 @@ def _embed_uint8_arrays(
 
 def _sample_episode_indices(
     n_items: int,
-    image_ids: Sequence[str],
+    unit_ids: Sequence[str],
     k_support: int,
     n_query: int,
     rng: random.Random,
@@ -309,8 +309,8 @@ def _sample_episode_indices(
     all_idx = list(range(n_items))
     if n_items >= k_support + n_query:
         support = rng.sample(all_idx, k_support)
-        support_imgs = {image_ids[i] for i in support}
-        disjoint_pool = [i for i in all_idx if i not in set(support) and image_ids[i] not in support_imgs]
+        support_units = {unit_ids[i] for i in support}
+        disjoint_pool = [i for i in all_idx if i not in set(support) and unit_ids[i] not in support_units]
         if len(disjoint_pool) >= n_query:
             query = rng.sample(disjoint_pool, n_query)
         else:
@@ -331,6 +331,7 @@ def train_fewshot_ball(
     fixed_pos_ref_crops: Sequence[Image.Image],
     fixed_neg_ref_crops: Sequence[Image.Image],
     config: BallTrainConfig,
+    group_by: Mapping[str, str] | None = None,
 ) -> dict:
     from bola_fewshot.detector import resolve_device
 
@@ -365,6 +366,16 @@ def train_fewshot_ball(
     rng = random.Random(config.seed)
     k_sup = config.references_per_class
     n_qry = config.queries_per_class
+    pos_units = (
+        tuple(group_by.get(i, i) for i in pool.pos_image_ids)
+        if group_by is not None
+        else pool.pos_image_ids
+    )
+    neg_units = (
+        tuple(group_by.get(i, i) for i in pool.neg_image_ids)
+        if group_by is not None
+        else pool.neg_image_ids
+    )
 
     config.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     history: list[dict] = []
@@ -383,10 +394,10 @@ def train_fewshot_ball(
         for step in range(config.steps_per_epoch):
             step_t0 = time.monotonic()
             pos_sup, pos_qry = _sample_episode_indices(
-                len(pool.pos_arrays), pool.pos_image_ids, k_sup, n_qry, rng
+                len(pool.pos_arrays), pos_units, k_sup, n_qry, rng
             )
             neg_sup, neg_qry = _sample_episode_indices(
-                len(pool.neg_arrays), pool.neg_image_ids, k_sup, n_qry, rng
+                len(pool.neg_arrays), neg_units, k_sup, n_qry, rng
             )
             sup_arr = np.concatenate([pool.neg_arrays[neg_sup], pool.pos_arrays[pos_sup]], axis=0)
             qry_arr = np.concatenate([pool.neg_arrays[neg_qry], pool.pos_arrays[pos_qry]], axis=0)

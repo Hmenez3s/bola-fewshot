@@ -867,6 +867,7 @@ def run_experiment(
                 imagenet_weights_path=config.imagenet_weights_path,
                 checkpoint_path=config.trained_checkpoint_path,
             ),
+            group_by=resolved_group_map,
         )
         trained_enc = FewShotR18Encoder(
             config.trained_checkpoint_path,
