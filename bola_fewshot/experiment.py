@@ -506,6 +506,10 @@ def _evaluate_extra_split(
         "applied_config_id": primary_arm["applied_config_id"],
         "frozen_threshold": primary_arm["frozen_threshold"],
         "baseline": _strip_per_image(base_metrics),
+        "detector_conf_separability": {
+            "roc_auc": compute_roc_auc([d.conf for d in flat_dets], is_tp),
+            "pr_auc": compute_pr_auc([d.conf for d in flat_dets], is_tp),
+        },
         "filtered": primary_arm["filtered"],
         "separability": primary_arm["separability"],
         "filter_cost": primary_arm["filter_cost"],
@@ -679,7 +683,7 @@ def run_experiment(
         iou_threshold=config.eval_iou,
     )
 
-    _, calib_is_tp, calib_crops = _extract_detection_crops(
+    calib_flat_dets, calib_is_tp, calib_crops = _extract_detection_crops(
         calib_split,
         calib_dets,
         eval_iou=config.eval_iou,
@@ -693,6 +697,12 @@ def run_experiment(
         context_scale=config.context_scale,
         square_crop=config.square_crop,
     )
+    detector_conf_separability = {
+        "calib_roc_auc": compute_roc_auc([d.conf for d in calib_flat_dets], calib_is_tp),
+        "calib_pr_auc": compute_pr_auc([d.conf for d in calib_flat_dets], calib_is_tp),
+        "eval_roc_auc": compute_roc_auc([d.conf for d in eval_flat_dets], eval_is_tp),
+        "eval_pr_auc": compute_pr_auc([d.conf for d in eval_flat_dets], eval_is_tp),
+    }
 
     max_k = max(config.k_values)
     pos_ref_crops, pos_ref_meta = _sample_train_positive_references(
@@ -1053,6 +1063,7 @@ def run_experiment(
         },
         "baseline_calib": _strip_per_image(calib_base_metrics),
         "baseline_eval": _strip_per_image(eval_base_metrics),
+        "detector_conf_separability": detector_conf_separability,
         "best_primary_calib_roc_auc": best_primary_calib_auc,
         "selected_config_id": chosen_entry["config_id"],
         "selected_frozen_config_id": chosen_frozen["config_id"],
