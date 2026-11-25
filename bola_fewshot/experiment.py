@@ -758,22 +758,64 @@ def run_experiment(
         )
     )
 
+    pool = None
     neg_ref_crops: list[Image.Image] = []
     neg_ref_meta: list[dict] = []
-    neg_emb_by_layer: dict[str, np.ndarray] = {}
-    if should_run_variations:
-        neg_cache = config.cache_dir / "dets_train_neg_sample.json" if config.cache_dir else None
-        neg_ref_crops, neg_ref_meta = _sample_train_negative_references(
+    if config.train_ball_arm:
+        mining_detector = (
+            detector
+            if detector is not None
+            else YoloBallDetector(
+                config.detector_weights,
+                imgsz=config.imgsz,
+                conf=config.train_mining_conf,
+                iou=config.iou,
+                max_det=config.max_det,
+                target_class=config.target_class,
+                device=config.device,
+                batch_size=config.batch_size,
+            )
+        )
+        mining_cache = config.cache_dir / "dets_train_mining.json" if config.cache_dir else None
+        pool = mine_training_crop_pool(
             train_ref,
-            det_runner,
-            max_k=max_k,
-            seed=config.seed,
+            mining_detector,
+            eval_conf=config.conf,
+            mining_conf=config.train_mining_conf,
             eval_iou=config.eval_iou,
-            max_images=config.max_train_neg_images,
+            max_images=config.train_mining_max_images,
+            min_negatives=config.train_min_negatives,
+            seed=config.train_seed,
+            canvas_wh=config.canvas_wh,
             context_scale=config.context_scale,
             square_crop=config.square_crop,
-            cache_path=neg_cache,
+            cache_path=mining_cache,
         )
+        neg_rng = random.Random(config.seed + 2)
+        neg_indices = list(range(len(pool.neg_arrays)))
+        neg_rng.shuffle(neg_indices)
+        chosen_neg_idx = neg_indices[: min(max_k, len(pool.neg_arrays))]
+        neg_ref_crops = [Image.fromarray(pool.neg_arrays[i]) for i in chosen_neg_idx]
+        neg_ref_meta = [
+            {"image_id": pool.neg_image_ids[i], "source": "mined_train_pool"}
+            for i in chosen_neg_idx
+        ]
+
+    neg_emb_by_layer: dict[str, np.ndarray] = {}
+    if should_run_variations:
+        if not neg_ref_crops:
+            neg_cache = config.cache_dir / "dets_train_neg_sample.json" if config.cache_dir else None
+            neg_ref_crops, neg_ref_meta = _sample_train_negative_references(
+                train_ref,
+                det_runner,
+                max_k=max_k,
+                seed=config.seed,
+                eval_iou=config.eval_iou,
+                max_images=config.max_train_neg_images,
+                context_scale=config.context_scale,
+                square_crop=config.square_crop,
+                cache_path=neg_cache,
+            )
         for variant in CONTROLLED_VARIATIONS:
             pos_emb, calib_emb, eval_emb = get_layer_embeddings(variant.layer)
             neg_emb = None
@@ -814,48 +856,14 @@ def run_experiment(
                 per_image_by_config[entry["config_id"]] = per_img
 
     trained_ball_summary: dict | None = None
-    if config.train_ball_arm:
-        mining_detector = (
-            detector
-            if detector is not None
-            else YoloBallDetector(
-                config.detector_weights,
-                imgsz=config.imgsz,
-                conf=config.train_mining_conf,
-                iou=config.iou,
-                max_det=config.max_det,
-                target_class=config.target_class,
-                device=config.device,
-                batch_size=config.batch_size,
-            )
-        )
-        mining_cache = config.cache_dir / "dets_train_mining.json" if config.cache_dir else None
-        pool = mine_training_crop_pool(
-            train_ref,
-            mining_detector,
-            eval_conf=config.conf,
-            mining_conf=config.train_mining_conf,
-            eval_iou=config.eval_iou,
-            max_images=config.train_mining_max_images,
-            min_negatives=config.train_min_negatives,
-            seed=config.train_seed,
-            canvas_wh=config.canvas_wh,
-            context_scale=config.context_scale,
-            square_crop=config.square_crop,
-            cache_path=mining_cache,
-        )
-        trained_neg_ref_crops = (
-            list(neg_ref_crops)
-            if len(neg_ref_crops) >= max_k
-            else [Image.fromarray(pool.neg_arrays[i]) for i in range(min(max_k, len(pool.neg_arrays)))]
-        )
+    if config.train_ball_arm and pool is not None:
         trained_ball_summary = train_fewshot_ball(
             pool,
             val_calib_crops=calib_crops,
             val_calib_is_tp=calib_is_tp,
             val_calib_total_gt=count_gt_boxes(calib_split.records),
             fixed_pos_ref_crops=pos_ref_crops,
-            fixed_neg_ref_crops=trained_neg_ref_crops,
+            fixed_neg_ref_crops=neg_ref_crops,
             config=BallTrainConfig(
                 epochs=config.train_epochs,
                 steps_per_epoch=config.train_steps_per_epoch,
@@ -875,7 +883,7 @@ def run_experiment(
             canvas_wh=config.canvas_wh,
         )
         t_pos_emb = trained_enc.embed_crops(pos_ref_crops, layer="layer4")
-        t_neg_emb = trained_enc.embed_crops(trained_neg_ref_crops, layer="layer4")
+        t_neg_emb = trained_enc.embed_crops(neg_ref_crops, layer="layer4")
         t_calib_emb = trained_enc.embed_crops(calib_crops, layer="layer4")
         t_eval_emb = trained_enc.embed_crops(eval_crops, layer="layer4")
         for variant in TRAINED_BALL_VARIANTS:
