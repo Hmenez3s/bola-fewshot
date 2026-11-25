@@ -92,6 +92,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
     )
+    parser.add_argument("--train-ball-arm", action="store_true")
+    parser.add_argument("--train-epochs", type=int, default=8)
+    parser.add_argument("--train-steps-per-epoch", type=int, default=180)
+    parser.add_argument("--train-seed", type=int, default=25)
+    parser.add_argument("--train-mining-conf", type=float, default=0.05)
+    parser.add_argument("--train-mining-max-images", type=int, default=1500)
+    parser.add_argument("--train-min-negatives", type=int, default=200)
+    parser.add_argument("--imagenet-weights", type=Path, default=None)
+    parser.add_argument("--trained-checkpoint", type=Path, default=Path("models/fewshot_r18_ball.pth"))
     return parser
 
 
@@ -132,6 +141,15 @@ def main(argv: list[str] | None = None) -> int:
         cache_dir=args.cache_dir,
         extra_datasets=tuple(args.extra_dataset),
         extra_val_lists=tuple(args.extra_val_list),
+        train_ball_arm=args.train_ball_arm,
+        train_epochs=args.train_epochs,
+        train_steps_per_epoch=args.train_steps_per_epoch,
+        train_seed=args.train_seed,
+        train_mining_conf=args.train_mining_conf,
+        train_mining_max_images=args.train_mining_max_images,
+        train_min_negatives=args.train_min_negatives,
+        imagenet_weights_path=args.imagenet_weights,
+        trained_checkpoint_path=args.trained_checkpoint,
     )
     results = run_experiment(config)
     selected_id = results["selected_config_id"]

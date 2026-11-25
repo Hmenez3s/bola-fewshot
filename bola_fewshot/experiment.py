@@ -33,6 +33,11 @@ from bola_fewshot.metrics import (
     paired_bootstrap_diff,
     paired_cluster_bootstrap_diff,
 )
+from bola_fewshot.train_ball import (
+    BallTrainConfig,
+    mine_training_crop_pool,
+    train_fewshot_ball,
+)
 
 
 @dataclass(frozen=True)
@@ -79,6 +84,15 @@ class ExperimentConfig:
     cache_dir: Path | None = None
     extra_datasets: tuple[tuple[str, Path], ...] = ()
     extra_val_lists: tuple[tuple[str, Path], ...] = ()
+    train_ball_arm: bool = False
+    train_epochs: int = 8
+    train_steps_per_epoch: int = 180
+    train_seed: int = 25
+    train_mining_conf: float = 0.05
+    train_mining_max_images: int = 1500
+    train_min_negatives: int = 200
+    imagenet_weights_path: Path | None = None
+    trained_checkpoint_path: Path = Path("models/fewshot_r18_ball.pth")
 
 
 PRIMARY_VARIANT = FilterVariantSpec(
@@ -106,6 +120,21 @@ CONTROLLED_VARIATIONS = (
         layer="layer2",
         mode="positive_only",
         stage="variation",
+    ),
+)
+
+TRAINED_BALL_VARIANTS = (
+    FilterVariantSpec(
+        name="trained_ball_layer4_pos_minus_neg",
+        layer="layer4",
+        mode="pos_minus_neg",
+        stage="trained_ball",
+    ),
+    FilterVariantSpec(
+        name="trained_ball_layer4_positive_only",
+        layer="layer4",
+        mode="positive_only",
+        stage="trained_ball",
     ),
 )
 
@@ -320,8 +349,9 @@ def _evaluate_configuration(
     eval_iou: float,
     bootstrap_resamples: int,
     seed: int,
+    arm: str = "frozen_players",
     group_by: Mapping[str, str] | None = None,
-) -> tuple[dict, PrototypeFilter, float]:
+) -> tuple[dict, PrototypeFilter, float, dict[str, dict[str, int]]]:
     actual_k_pos = min(k, len(pos_emb_pool))
     pos_subset = pos_emb_pool[:actual_k_pos]
     neg_subset = None
@@ -377,6 +407,7 @@ def _evaluate_configuration(
     config_id = f"{variant.name}_k{k}"
     entry = {
         "config_id": config_id,
+        "arm": arm,
         "variant": variant.name,
         "stage": variant.stage,
         "layer": variant.layer,
@@ -402,7 +433,7 @@ def _evaluate_configuration(
         "bootstrap": bootstrap,
         "cluster_bootstrap": cluster_bootstrap,
     }
-    return entry, proto_filter, frozen_threshold
+    return entry, proto_filter, frozen_threshold, eval_filt_metrics["per_image"]
 
 
 def _evaluate_extra_split(
@@ -411,10 +442,7 @@ def _evaluate_extra_split(
     source_desc: str,
     split: DatasetSplit,
     detector: BallDetectorProtocol,
-    encoder: FewShotR18Encoder,
-    chosen_entry: dict,
-    chosen_filter: PrototypeFilter,
-    frozen_threshold: float,
+    arm_specs: Sequence[tuple[str, dict, FewShotR18Encoder, PrototypeFilter, float]],
     config: ExperimentConfig,
 ) -> dict:
     cache_path = config.cache_dir / f"dets_{dataset_name}.json" if config.cache_dir else None
@@ -432,44 +460,59 @@ def _evaluate_extra_split(
         context_scale=config.context_scale,
         square_crop=config.square_crop,
     )
-    emb = encoder.embed_crops(crops, layer=chosen_entry["layer"])
-    scores = chosen_filter.score(emb)
-    roc_auc = compute_roc_auc(scores, is_tp)
-    pr_auc = compute_pr_auc(scores, is_tp)
-    kept_mask = scores >= frozen_threshold
-    filtered_by_image = _apply_mask_to_detections(split, flat_dets, kept_mask)
-    filt_metrics = evaluate_detections(
-        _preds_to_eval_format(filtered_by_image),
-        split.gt_by_image(),
-        split.image_ids,
-        iou_threshold=config.eval_iou,
-    )
-    cost = compute_filter_cost(is_tp, kept_mask)
-    bootstrap = paired_bootstrap_diff(
-        base_metrics["per_image"],
-        filt_metrics["per_image"],
-        split.image_ids,
-        n_resamples=config.bootstrap_resamples,
-        seed=config.seed + 2000,
-    )
+    arm_results: dict[str, dict] = {}
+    for arm_name, entry, enc, proto_filter, frozen_threshold in arm_specs:
+        emb = enc.embed_crops(crops, layer=entry["layer"])
+        scores = proto_filter.score(emb)
+        roc_auc = compute_roc_auc(scores, is_tp)
+        pr_auc = compute_pr_auc(scores, is_tp)
+        kept_mask = scores >= frozen_threshold
+        filtered_by_image = _apply_mask_to_detections(split, flat_dets, kept_mask)
+        filt_metrics = evaluate_detections(
+            _preds_to_eval_format(filtered_by_image),
+            split.gt_by_image(),
+            split.image_ids,
+            iou_threshold=config.eval_iou,
+        )
+        cost = compute_filter_cost(is_tp, kept_mask)
+        bootstrap = paired_bootstrap_diff(
+            base_metrics["per_image"],
+            filt_metrics["per_image"],
+            split.image_ids,
+            n_resamples=config.bootstrap_resamples,
+            seed=config.seed + 2000,
+        )
+        arm_results[arm_name] = {
+            "arm": arm_name,
+            "applied_config_id": entry["config_id"],
+            "frozen_threshold": frozen_threshold,
+            "filtered": _strip_per_image(filt_metrics),
+            "separability": {
+                "roc_auc": roc_auc,
+                "pr_auc": pr_auc,
+                "n_tp": int(is_tp.sum()),
+                "n_fp": int((~is_tp).sum()),
+            },
+            "filter_cost": cost,
+            "delta_map50": float(filt_metrics["map50"] - base_metrics["map50"]),
+            "delta_map50_95": float(filt_metrics["map50_95"] - base_metrics["map50_95"]),
+            "bootstrap": bootstrap,
+        }
+    primary_arm = arm_results.get("trained_ball") or next(iter(arm_results.values()))
     return {
         "name": dataset_name,
         "status": "measured",
         "data_yaml": source_desc,
-        "applied_config_id": chosen_entry["config_id"],
-        "frozen_threshold": frozen_threshold,
+        "applied_config_id": primary_arm["applied_config_id"],
+        "frozen_threshold": primary_arm["frozen_threshold"],
         "baseline": _strip_per_image(base_metrics),
-        "filtered": _strip_per_image(filt_metrics),
-        "separability": {
-            "roc_auc": roc_auc,
-            "pr_auc": pr_auc,
-            "n_tp": int(is_tp.sum()),
-            "n_fp": int((~is_tp).sum()),
-        },
-        "filter_cost": cost,
-        "delta_map50": float(filt_metrics["map50"] - base_metrics["map50"]),
-        "delta_map50_95": float(filt_metrics["map50_95"] - base_metrics["map50_95"]),
-        "bootstrap": bootstrap,
+        "filtered": primary_arm["filtered"],
+        "separability": primary_arm["separability"],
+        "filter_cost": primary_arm["filter_cost"],
+        "delta_map50": primary_arm["delta_map50"],
+        "delta_map50_95": primary_arm["delta_map50_95"],
+        "bootstrap": primary_arm["bootstrap"],
+        "arms": arm_results,
     }
 
 
@@ -478,10 +521,7 @@ def _evaluate_extra_dataset(
     dataset_name: str,
     data_yaml: Path,
     detector: BallDetectorProtocol,
-    encoder: FewShotR18Encoder,
-    chosen_entry: dict,
-    chosen_filter: PrototypeFilter,
-    frozen_threshold: float,
+    arm_specs: Sequence[tuple[str, dict, FewShotR18Encoder, PrototypeFilter, float]],
     config: ExperimentConfig,
 ) -> dict:
     extra_splits = load_yolo_dataset(
@@ -498,10 +538,7 @@ def _evaluate_extra_dataset(
         source_desc=str(data_yaml),
         split=split,
         detector=detector,
-        encoder=encoder,
-        chosen_entry=chosen_entry,
-        chosen_filter=chosen_filter,
-        frozen_threshold=frozen_threshold,
+        arm_specs=arm_specs,
         config=config,
     )
 
@@ -678,12 +715,13 @@ def run_experiment(
         return emb_cache[layer]
 
     results_list: list[dict] = []
-    fitted_models: dict[str, tuple[PrototypeFilter, float]] = {}
+    fitted_models: dict[str, tuple[FewShotR18Encoder, PrototypeFilter, float]] = {}
+    per_image_by_config: dict[str, dict[str, dict[str, int]]] = {}
     skipped_variants: list[dict] = []
 
     pos_emb_l4, calib_emb_l4, eval_emb_l4 = get_layer_embeddings(PRIMARY_VARIANT.layer)
     for k in config.k_values:
-        entry, proto, thresh = _evaluate_configuration(
+        entry, proto, thresh, per_img = _evaluate_configuration(
             variant=PRIMARY_VARIANT,
             k=k,
             pos_emb_pool=pos_emb_l4,
@@ -699,10 +737,12 @@ def run_experiment(
             eval_iou=config.eval_iou,
             bootstrap_resamples=config.bootstrap_resamples,
             seed=config.seed,
+            arm="frozen_players",
             group_by=resolved_group_map,
         )
         results_list.append(entry)
-        fitted_models[entry["config_id"]] = (proto, thresh)
+        fitted_models[entry["config_id"]] = (enc, proto, thresh)
+        per_image_by_config[entry["config_id"]] = per_img
 
     primary_aucs = [
         r["separability"]["calib_roc_auc"]
@@ -718,6 +758,7 @@ def run_experiment(
         )
     )
 
+    neg_ref_crops: list[Image.Image] = []
     neg_ref_meta: list[dict] = []
     neg_emb_by_layer: dict[str, np.ndarray] = {}
     if should_run_variations:
@@ -749,7 +790,7 @@ def run_experiment(
                     neg_emb_by_layer[variant.layer] = enc.embed_crops(neg_ref_crops, layer=variant.layer)
                 neg_emb = neg_emb_by_layer[variant.layer]
             for k in config.k_values:
-                entry, proto, thresh = _evaluate_configuration(
+                entry, proto, thresh, per_img = _evaluate_configuration(
                     variant=variant,
                     k=k,
                     pos_emb_pool=pos_emb,
@@ -765,22 +806,149 @@ def run_experiment(
                     eval_iou=config.eval_iou,
                     bootstrap_resamples=config.bootstrap_resamples,
                     seed=config.seed,
+                    arm="frozen_players",
                     group_by=resolved_group_map,
                 )
                 results_list.append(entry)
-                fitted_models[entry["config_id"]] = (proto, thresh)
+                fitted_models[entry["config_id"]] = (enc, proto, thresh)
+                per_image_by_config[entry["config_id"]] = per_img
 
-    chosen_entry = max(
-        results_list,
-        key=lambda r: (
-            round(r["calibration"]["calib_best_f1"], 12),
-            round(r["calibration"]["calib_best_recall"], 12),
-            r["separability"]["calib_roc_auc"] if r["separability"]["calib_roc_auc"] is not None else -1.0,
-            1 if r["stage"] == "primary" else 0,
-            -r["k_requested"],
-        ),
-    )
-    chosen_filter, chosen_threshold = fitted_models[chosen_entry["config_id"]]
+    trained_ball_summary: dict | None = None
+    if config.train_ball_arm:
+        mining_detector = (
+            detector
+            if detector is not None
+            else YoloBallDetector(
+                config.detector_weights,
+                imgsz=config.imgsz,
+                conf=config.train_mining_conf,
+                iou=config.iou,
+                max_det=config.max_det,
+                target_class=config.target_class,
+                device=config.device,
+                batch_size=config.batch_size,
+            )
+        )
+        mining_cache = config.cache_dir / "dets_train_mining.json" if config.cache_dir else None
+        pool = mine_training_crop_pool(
+            train_ref,
+            mining_detector,
+            eval_conf=config.conf,
+            mining_conf=config.train_mining_conf,
+            eval_iou=config.eval_iou,
+            max_images=config.train_mining_max_images,
+            min_negatives=config.train_min_negatives,
+            seed=config.train_seed,
+            canvas_wh=config.canvas_wh,
+            context_scale=config.context_scale,
+            square_crop=config.square_crop,
+            cache_path=mining_cache,
+        )
+        trained_neg_ref_crops = (
+            list(neg_ref_crops)
+            if len(neg_ref_crops) >= max_k
+            else [Image.fromarray(pool.neg_arrays[i]) for i in range(min(max_k, len(pool.neg_arrays)))]
+        )
+        trained_ball_summary = train_fewshot_ball(
+            pool,
+            val_calib_crops=calib_crops,
+            val_calib_is_tp=calib_is_tp,
+            val_calib_total_gt=count_gt_boxes(calib_split.records),
+            fixed_pos_ref_crops=pos_ref_crops,
+            fixed_neg_ref_crops=trained_neg_ref_crops,
+            config=BallTrainConfig(
+                epochs=config.train_epochs,
+                steps_per_epoch=config.train_steps_per_epoch,
+                references_per_class=min(6, max_k),
+                queries_per_class=8,
+                seed=config.train_seed,
+                canvas_wh=config.canvas_wh,
+                device=config.device,
+                imagenet_weights_path=config.imagenet_weights_path,
+                checkpoint_path=config.trained_checkpoint_path,
+            ),
+        )
+        trained_enc = FewShotR18Encoder(
+            config.trained_checkpoint_path,
+            device=config.device,
+            canvas_wh=config.canvas_wh,
+        )
+        t_pos_emb = trained_enc.embed_crops(pos_ref_crops, layer="layer4")
+        t_neg_emb = trained_enc.embed_crops(trained_neg_ref_crops, layer="layer4")
+        t_calib_emb = trained_enc.embed_crops(calib_crops, layer="layer4")
+        t_eval_emb = trained_enc.embed_crops(eval_crops, layer="layer4")
+        for variant in TRAINED_BALL_VARIANTS:
+            for k in config.k_values:
+                entry, proto, thresh, per_img = _evaluate_configuration(
+                    variant=variant,
+                    k=k,
+                    pos_emb_pool=t_pos_emb,
+                    neg_emb_pool=t_neg_emb if variant.mode == "pos_minus_neg" else None,
+                    calib_split=calib_split,
+                    calib_emb=t_calib_emb,
+                    calib_is_tp=calib_is_tp,
+                    eval_split=eval_split,
+                    eval_flat_dets=eval_flat_dets,
+                    eval_emb=t_eval_emb,
+                    eval_is_tp=eval_is_tp,
+                    eval_base_metrics=eval_base_metrics,
+                    eval_iou=config.eval_iou,
+                    bootstrap_resamples=config.bootstrap_resamples,
+                    seed=config.seed,
+                    arm="trained_ball",
+                    group_by=resolved_group_map,
+                )
+                results_list.append(entry)
+                fitted_models[entry["config_id"]] = (trained_enc, proto, thresh)
+                per_image_by_config[entry["config_id"]] = per_img
+
+    def _select_best(entries: Sequence[dict]) -> dict:
+        return max(
+            entries,
+            key=lambda r: (
+                round(r["calibration"]["calib_best_f1"], 12),
+                round(r["calibration"]["calib_best_recall"], 12),
+                r["separability"]["calib_roc_auc"] if r["separability"]["calib_roc_auc"] is not None else -1.0,
+                1 if r["stage"] in ("primary", "trained_ball") else 0,
+                -r["k_requested"],
+            ),
+        )
+
+    frozen_entries = [r for r in results_list if r["arm"] == "frozen_players"]
+    trained_entries = [r for r in results_list if r["arm"] == "trained_ball"]
+    chosen_frozen = _select_best(frozen_entries)
+    chosen_trained = _select_best(trained_entries) if trained_entries else None
+    chosen_entry = _select_best(results_list)
+
+    arm3_vs_arm2_bootstrap = None
+    arm3_vs_arm2_cluster_bootstrap = None
+    if chosen_trained is not None:
+        arm3_vs_arm2_bootstrap = paired_bootstrap_diff(
+            per_image_by_config[chosen_frozen["config_id"]],
+            per_image_by_config[chosen_trained["config_id"]],
+            eval_split.image_ids,
+            n_resamples=config.bootstrap_resamples,
+            seed=config.seed + 1700,
+        )
+        if resolved_group_map is not None:
+            unique_eval_groups = {resolved_group_map.get(i, i) for i in eval_split.image_ids}
+            if 2 <= len(unique_eval_groups) < len(eval_split.image_ids):
+                arm3_vs_arm2_cluster_bootstrap = paired_cluster_bootstrap_diff(
+                    per_image_by_config[chosen_frozen["config_id"]],
+                    per_image_by_config[chosen_trained["config_id"]],
+                    eval_split.image_ids,
+                    resolved_group_map,
+                    n_resamples=config.bootstrap_resamples,
+                    seed=config.seed + 1800,
+                )
+
+    extra_arm_specs: list[tuple[str, dict, FewShotR18Encoder, PrototypeFilter, float]] = [
+        ("frozen_players", chosen_frozen, *fitted_models[chosen_frozen["config_id"]]),
+    ]
+    if chosen_trained is not None:
+        extra_arm_specs.append(
+            ("trained_ball", chosen_trained, *fitted_models[chosen_trained["config_id"]]),
+        )
 
     extra_results: list[dict] = []
     for ds_name, ds_yaml in config.extra_datasets:
@@ -789,10 +957,7 @@ def run_experiment(
                 dataset_name=ds_name,
                 data_yaml=ds_yaml,
                 detector=det_runner,
-                encoder=enc,
-                chosen_entry=chosen_entry,
-                chosen_filter=chosen_filter,
-                frozen_threshold=chosen_threshold,
+                arm_specs=extra_arm_specs,
                 config=config,
             )
         )
@@ -812,10 +977,7 @@ def run_experiment(
                 source_desc=str(list_path),
                 split=extra_split,
                 detector=det_runner,
-                encoder=enc,
-                chosen_entry=chosen_entry,
-                chosen_filter=chosen_filter,
-                frozen_threshold=chosen_threshold,
+                arm_specs=extra_arm_specs,
                 config=config,
             )
         )
@@ -853,6 +1015,7 @@ def run_experiment(
             "auc_variation_trigger": config.auc_variation_trigger,
             "variations_executed": should_run_variations,
             "total_configs_tested": len(results_list),
+            "train_ball_arm_enabled": config.train_ball_arm,
             "skipped_variants": skipped_variants,
         },
         "splits": {
@@ -883,6 +1046,11 @@ def run_experiment(
         "baseline_eval": _strip_per_image(eval_base_metrics),
         "best_primary_calib_roc_auc": best_primary_calib_auc,
         "selected_config_id": chosen_entry["config_id"],
+        "selected_frozen_config_id": chosen_frozen["config_id"],
+        "selected_trained_config_id": chosen_trained["config_id"] if chosen_trained else None,
+        "trained_ball_summary": trained_ball_summary,
+        "arm3_vs_arm2_bootstrap": arm3_vs_arm2_bootstrap,
+        "arm3_vs_arm2_cluster_bootstrap": arm3_vs_arm2_cluster_bootstrap,
         "selection_rationale": (
             f"selected strictly on '{calib_split.name}' by highest calibration F1 "
             f"({chosen_entry['calibration']['calib_best_f1']:.4f} vs baseline "

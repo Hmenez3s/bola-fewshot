@@ -12,6 +12,7 @@ from bola_fewshot.experiment import ExperimentConfig, run_experiment
 from bola_fewshot.fewshot_filter import FewShotR18Encoder
 
 REAL_FEWSHOT_WEIGHTS = Path("/Users/j.henrique/four-reference-team-classifier/models/six-references.pth")
+REAL_IMAGENET_WEIGHTS = Path("/Users/j.henrique/four-reference-team-classifier/data/inputs/resnet18.pth")
 REAL_YOLO_WEIGHTS = Path("models/t1b_v5_etapa1_rodada1.pt")
 
 
@@ -235,3 +236,50 @@ def test_real_yolo_ball_detector_smoke_and_cache(tmp_path: Path) -> None:
     assert cache_path.is_file()
     second = detector.predict_records([record], cache_path=cache_path)
     assert second == first
+
+
+@pytest.mark.skipif(
+    not (REAL_FEWSHOT_WEIGHTS.is_file() and REAL_IMAGENET_WEIGHTS.is_file()),
+    reason="local FewShot-R18 and ImageNet weights not present",
+)
+def test_three_arm_pipeline_with_trained_ball_on_synthetic_data(tmp_path: Path) -> None:
+    data_yaml, b2b_yaml, synth_detector = _build_synthetic_dataset(tmp_path / "ds")
+    out_dir = tmp_path / "results"
+    report_path = tmp_path / "RELATORIO.md"
+    ckpt_path = tmp_path / "trained_ball.pth"
+
+    config = ExperimentConfig(
+        data_yaml=data_yaml,
+        detector_weights=tmp_path / "unused.pt",
+        fewshot_weights=REAL_FEWSHOT_WEIGHTS,
+        output_dir=out_dir,
+        report_path=report_path,
+        k_values=(1, 6),
+        seed=42,
+        calib_source="val_split",
+        calib_fraction=0.50,
+        bootstrap_resamples=200,
+        variations="never",
+        device="cpu",
+        extra_datasets=(("box2boxcam", b2b_yaml),),
+        train_ball_arm=True,
+        train_epochs=2,
+        train_steps_per_epoch=8,
+        train_seed=25,
+        train_mining_max_images=12,
+        train_min_negatives=12,
+        imagenet_weights_path=REAL_IMAGENET_WEIGHTS,
+        trained_checkpoint_path=ckpt_path,
+    )
+    encoder = FewShotR18Encoder(REAL_FEWSHOT_WEIGHTS, device="cpu")
+    payload = run_experiment(config, detector=synth_detector, encoder=encoder)
+    assert ckpt_path.is_file()
+    assert payload["selected_trained_config_id"] is not None
+    assert payload["arm3_vs_arm2_bootstrap"] is not None
+    assert payload["trained_ball_summary"]["best_epoch"] in (1, 2)
+    assert len(payload["extra_datasets"][0]["arms"]) == 2
+    report_text = report_path.read_text(encoding="utf-8")
+    assert "## Treino episódico do FewShot-R18-bola (receita do paper)" in report_text
+    summary_section = report_text.split("## Resumo (8 linhas)\n\n", 1)[1].split("\n\n## ", 1)[0]
+    summary_lines = [line for line in summary_section.splitlines() if line.strip()]
+    assert len(summary_lines) == 8
