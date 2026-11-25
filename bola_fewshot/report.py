@@ -253,6 +253,13 @@ def render_report(results: dict[str, Any]) -> str:
         ]
     )
 
+    det_sep = results.get("detector_conf_separability")
+    if det_sep is not None:
+        lines.append(
+            f"| Detector sozinho (referência `conf`) | `detector_conf` | - | `conf` | - | "
+            f"{_fmt(det_sep['calib_roc_auc'])} | {_fmt(det_sep['calib_pr_auc'])} | "
+            f"{_fmt(det_sep['eval_roc_auc'])} | {_fmt(det_sep['eval_pr_auc'])} | {base['tp']} / {base['fp']} |"
+        )
     for cfg in configs:
         sep = cfg["separability"]
         lines.append(
@@ -347,7 +354,8 @@ def render_report(results: dict[str, Any]) -> str:
                     "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
                     (
                         f"| Detector sozinho | baseline | - | {_fmt(db['precision'])} | {_fmt(db['recall'])} | "
-                        f"{_fmt(db['f1'])} | {_fmt(db['map50'])} | 0 / {db['fp']} | 0 / {db['tp']} | - | 0.0000 |"
+                        f"{_fmt(db['f1'])} | {_fmt(db['map50'])} | 0 / {db['fp']} | 0 / {db['tp']} | "
+                        f"{_fmt((ds.get('detector_conf_separability') or {}).get('roc_auc'))} | 0.0000 |"
                     ),
                 ]
             )
