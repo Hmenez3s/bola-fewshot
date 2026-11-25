@@ -63,8 +63,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("val_split", "train_holdout"),
         default="val_split",
     )
-    parser.add_argument("--calib-fraction", type=float, default=0.30)
+    parser.add_argument("--calib-fraction", type=float, default=0.50)
     parser.add_argument("--bootstrap-resamples", type=int, default=2000)
+    parser.add_argument("--group-map-json", type=Path, default=None)
+    parser.add_argument("--val-status-note", type=str, default=None)
     parser.add_argument("--canvas", type=_parse_canvas, default=(48, 96))
     parser.add_argument("--context-scale", type=float, default=1.0)
     parser.add_argument("--square-crop", action="store_true")
@@ -117,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
         calib_source=args.calib_source,
         calib_fraction=args.calib_fraction,
         bootstrap_resamples=args.bootstrap_resamples,
+        group_map_path=args.group_map_json,
+        val_status_note=args.val_status_note,
         canvas_wh=args.canvas,
         context_scale=args.context_scale,
         square_crop=args.square_crop,

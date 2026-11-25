@@ -4,6 +4,7 @@ from PIL import Image
 import pytest
 
 from bola_fewshot.dataset import (
+    audit_group_overlap,
     crop_box,
     load_yolo_dataset,
     partition_split,
@@ -141,4 +142,21 @@ def test_windows_absolute_prefix_remapping_and_stratified_sampling(tmp_path: Pat
     assert meta["subsampled"] is True
     assert len(sampled.records) == 4
     assert meta["sampled_pos_images"] == 2
+
+    group_by = {
+        r.image_id: r.image_path.stem.split("_", 1)[0]
+        for r in (*splits_remap["train"].records, *splits_remap["val"].records)
+    }
+    tv_audit = audit_group_overlap(splits_remap["train"], splits_remap["val"], group_by)
+    assert tv_audit["groups_a"] == 1
+    assert tv_audit["groups_b"] == 2
+    assert tv_audit["shared_groups"] == 1
+    assert tv_audit["disjoint_by_group"] is False
+
+    c_split, e_split = partition_split(
+        splits_remap["val"], 0.5, seed=42, first_name="val_calib", second_name="val_eval", group_by=group_by
+    )
+    ce_audit = audit_group_overlap(c_split, e_split, group_by)
+    assert ce_audit["disjoint_by_group"] is True
+    assert ce_audit["shared_groups"] == 0
 

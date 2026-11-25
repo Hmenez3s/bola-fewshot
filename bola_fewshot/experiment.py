@@ -14,6 +14,7 @@ from bola_fewshot.dataset import (
     DatasetSplit,
     ImageRecord,
     assert_disjoint_splits,
+    audit_group_overlap,
     count_gt_boxes,
     crop_box,
     load_image_list_split,
@@ -30,6 +31,7 @@ from bola_fewshot.metrics import (
     evaluate_detections,
     match_image_detections,
     paired_bootstrap_diff,
+    paired_cluster_bootstrap_diff,
 )
 
 
@@ -62,8 +64,10 @@ class ExperimentConfig:
     k_values: tuple[int, ...] = (1, 6)
     seed: int = 42
     calib_source: str = "val_split"
-    calib_fraction: float = 0.30
+    calib_fraction: float = 0.50
     bootstrap_resamples: int = 2000
+    group_map_path: Path | None = None
+    val_status_note: str | None = None
     canvas_wh: tuple[int, int] = (48, 96)
     context_scale: float = 1.0
     square_crop: bool = False
@@ -316,6 +320,7 @@ def _evaluate_configuration(
     eval_iou: float,
     bootstrap_resamples: int,
     seed: int,
+    group_by: Mapping[str, str] | None = None,
 ) -> tuple[dict, PrototypeFilter, float]:
     actual_k_pos = min(k, len(pos_emb_pool))
     pos_subset = pos_emb_pool[:actual_k_pos]
@@ -356,6 +361,18 @@ def _evaluate_configuration(
         n_resamples=bootstrap_resamples,
         seed=seed + 1000,
     )
+    cluster_bootstrap = None
+    if group_by is not None:
+        unique_eval_groups = {group_by.get(i, i) for i in eval_split.image_ids}
+        if 2 <= len(unique_eval_groups) < len(eval_split.image_ids):
+            cluster_bootstrap = paired_cluster_bootstrap_diff(
+                eval_base_metrics["per_image"],
+                eval_filt_metrics["per_image"],
+                eval_split.image_ids,
+                group_by,
+                n_resamples=bootstrap_resamples,
+                seed=seed + 1500,
+            )
 
     config_id = f"{variant.name}_k{k}"
     entry = {
@@ -383,6 +400,7 @@ def _evaluate_configuration(
         "delta_map50": float(eval_filt_metrics["map50"] - eval_base_metrics["map50"]),
         "delta_map50_95": float(eval_filt_metrics["map50_95"] - eval_base_metrics["map50_95"]),
         "bootstrap": bootstrap,
+        "cluster_bootstrap": cluster_bootstrap,
     }
     return entry, proto_filter, frozen_threshold
 
@@ -488,11 +506,34 @@ def _evaluate_extra_dataset(
     )
 
 
+def _load_group_map(
+    group_map_path: Path | None,
+    splits: Sequence[DatasetSplit],
+) -> dict[str, str] | None:
+    if group_map_path is None:
+        return None
+    raw = json.loads(Path(group_map_path).read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(f"group map must be a JSON object: {group_map_path}")
+    resolved: dict[str, str] = {}
+    for split in splits:
+        for record in split.records:
+            gid = (
+                raw.get(record.image_id)
+                or raw.get(record.image_path.name)
+                or raw.get(record.image_path.stem)
+            )
+            if gid is not None:
+                resolved[record.image_id] = str(gid)
+    return resolved if resolved else None
+
+
 def run_experiment(
     config: ExperimentConfig,
     *,
     detector: BallDetectorProtocol | None = None,
     encoder: FewShotR18Encoder | None = None,
+    group_map: Mapping[str, str] | None = None,
 ) -> dict:
     if config.calib_source not in ("val_split", "train_holdout"):
         raise ValueError(f"unsupported calib_source: {config.calib_source}")
@@ -529,6 +570,12 @@ def run_experiment(
         seed=config.seed + 5,
     )
 
+    resolved_group_map = (
+        dict(group_map)
+        if group_map is not None
+        else _load_group_map(config.group_map_path, (train_full, val_full))
+    )
+
     if config.calib_source == "val_split":
         train_ref = train_full
         calib_split, eval_split = partition_split(
@@ -537,6 +584,7 @@ def run_experiment(
             seed=config.seed + 10,
             first_name="val_calib",
             second_name="val_eval",
+            group_by=resolved_group_map,
         )
     else:
         calib_split, train_ref = partition_split(
@@ -545,12 +593,20 @@ def run_experiment(
             seed=config.seed + 10,
             first_name="train_calib",
             second_name="train_ref",
+            group_by=resolved_group_map,
         )
         eval_split = val_full
 
     assert_disjoint_splits(train_ref, calib_split)
     assert_disjoint_splits(train_ref, eval_split)
     assert_disjoint_splits(calib_split, eval_split)
+
+    group_audit = None
+    if resolved_group_map is not None:
+        group_audit = {
+            "train_val": audit_group_overlap(train_full, val_full, resolved_group_map),
+            "calib_eval": audit_group_overlap(calib_split, eval_split, resolved_group_map),
+        }
 
     det_runner = detector or YoloBallDetector(
         config.detector_weights,
@@ -643,6 +699,7 @@ def run_experiment(
             eval_iou=config.eval_iou,
             bootstrap_resamples=config.bootstrap_resamples,
             seed=config.seed,
+            group_by=resolved_group_map,
         )
         results_list.append(entry)
         fitted_models[entry["config_id"]] = (proto, thresh)
@@ -708,6 +765,7 @@ def run_experiment(
                     eval_iou=config.eval_iou,
                     bootstrap_resamples=config.bootstrap_resamples,
                     seed=config.seed,
+                    group_by=resolved_group_map,
                 )
                 results_list.append(entry)
                 fitted_models[entry["config_id"]] = (proto, thresh)
@@ -811,6 +869,9 @@ def run_experiment(
             "eval_images": len(eval_split.records),
             "eval_gt_balls": count_gt_boxes(eval_split.records),
             "train_val_disjoint_verified": True,
+            "partition_unit": "group" if resolved_group_map is not None else "image",
+            "group_audit": group_audit,
+            "val_status_note": config.val_status_note,
         },
         "references": {
             "positive_references_sampled": len(pos_ref_meta),

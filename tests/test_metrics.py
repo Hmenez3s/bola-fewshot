@@ -10,6 +10,7 @@ from bola_fewshot.metrics import (
     evaluate_detections,
     match_image_detections,
     paired_bootstrap_diff,
+    paired_cluster_bootstrap_diff,
 )
 
 
@@ -86,3 +87,9 @@ def test_filter_cost_and_paired_bootstrap() -> None:
     same = paired_bootstrap_diff(base, base, ids, n_resamples=200, seed=7)
     assert same["delta_f1"]["distinguishable_from_zero"] is False
     assert same["delta_f1"]["direction"] == "indistinguishable"
+
+    group_by = {i: f"game_{idx // 2}" for idx, i in enumerate(ids)}
+    cboot = paired_cluster_bootstrap_diff(base, filt, ids, group_by, n_resamples=400, seed=7)
+    assert cboot["n_groups"] == 10
+    assert cboot["delta_f1"]["ci_95_low"] > 0.0
+    assert cboot["delta_f1"]["distinguishable_from_zero"] is True

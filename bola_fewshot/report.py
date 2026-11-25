@@ -68,18 +68,58 @@ def render_report(results: dict[str, Any]) -> str:
             f"({verdict_text})."
         )
 
+    group_audit = splits.get("group_audit")
+    val_status_note = splits.get("val_status_note")
+    if group_audit and group_audit.get("train_val"):
+        tv = group_audit["train_val"]
+        ce = group_audit.get("calib_eval") or {}
+        split_bias_detail = (
+            f"grupos/jogos: train={tv['groups_a']}, val={tv['groups_b']}, interseção={tv['shared_groups']} "
+            f"({'por jogo' if tv['disjoint_by_group'] else 'compartilha jogos'}); "
+            f"val dividido por grupo ({ce.get('groups_a', '?')}/{ce.get('groups_b', '?')}, "
+            f"interseção={ce.get('shared_groups', '?')})"
+        )
+    else:
+        split_bias_detail = f"partição de val por {splits.get('partition_unit', 'image')} (sem mapa de jogo fornecido)"
+
+    if val_status_note:
+        extra_line_prefix = f"{val_status_note}; {split_bias_detail}"
+    else:
+        extra_line_prefix = (
+            f"val não é teste virgem (usado na escolha do checkpoint do detector; "
+            f"comparação relativa justa sob o mesmo viés, absolutos potencialmente otimistas); {split_bias_detail}"
+        )
+
     extra_datasets = results.get("extra_datasets") or []
     box2box = next((d for d in extra_datasets if "box2box" in d["name"].lower()), None)
     if box2box is not None:
         b2b_boot = box2box["bootstrap"]["delta_f1"]
         extra_line = (
-            f"7. Câmera amadora ({box2box['name']}, n={box2box['baseline']['n_images']} imagens): "
-            f"ΔF1={_fmt_signed(b2b_boot['point_estimate'])} "
+            f"7. Viés de val e câmera amadora ({box2box['name']}, n={box2box['baseline']['n_images']}): "
+            f"{extra_line_prefix}. Em {box2box['name']}: ΔF1={_fmt_signed(b2b_boot['point_estimate'])} "
             f"(IC 95% [{_fmt_signed(b2b_boot['ci_95_low'])}, {_fmt_signed(b2b_boot['ci_95_high'])}], "
             f"ROC-AUC={_fmt(box2box['separability']['roc_auc'])})."
         )
     else:
-        extra_line = "7. Câmera amadora (box2boxcam): não medido (conjunto não fornecido ou inacessível nesta execução)."
+        extra_line = (
+            f"7. Viés de val e teste virgem: {extra_line_prefix}. "
+            f"Câmera amadora (box2boxcam): não medido (inacessível nesta execução)."
+        )
+
+    cluster_boot = selected.get("cluster_bootstrap")
+    if cluster_boot is not None:
+        cb_f1 = cluster_boot["delta_f1"]
+        boot_line = (
+            f"5. Intervalo bootstrap em ΔF1 ({protocol['bootstrap_resamples']} reamostragens): "
+            f"sobre imagens IC 95% [{_fmt_signed(sel_boot['ci_95_low'])}, {_fmt_signed(sel_boot['ci_95_high'])}] "
+            f"({verdict_text}); sobre jogos (n={cluster_boot['n_groups']}) IC 95% "
+            f"[{_fmt_signed(cb_f1['ci_95_low'])}, {_fmt_signed(cb_f1['ci_95_high'])}] ({_direction_pt(cb_f1['direction'])})."
+        )
+    else:
+        boot_line = (
+            f"5. Intervalo bootstrap em ΔF1 ({protocol['bootstrap_resamples']} reamostragens pareadas sobre imagens): "
+            f"IC 95% [{_fmt_signed(sel_boot['ci_95_low'])}, {_fmt_signed(sel_boot['ci_95_high'])}] — {verdict_text}."
+        )
 
     summary_lines = [
         verdict_line,
@@ -98,10 +138,7 @@ def render_report(results: dict[str, Any]) -> str:
             f"({_fmt(sel_cost['fp_removal_rate'] * 100, 1)}%) e removeu {sel_cost['tps_removed']}/{sel_cost['base_tp']} "
             f"bolas verdadeiras por engano (ΔRecall={_fmt_signed(sel_eval['recall'] - base['recall'])})."
         ),
-        (
-            f"5. Intervalo bootstrap em ΔF1 ({protocol['bootstrap_resamples']} reamostragens pareadas sobre imagens): "
-            f"IC 95% [{_fmt_signed(sel_boot['ci_95_low'])}, {_fmt_signed(sel_boot['ci_95_high'])}] — {verdict_text}."
-        ),
+        boot_line,
         (
             f"6. Separabilidade do FewShot-R18 (bola vs FP, sem limiar): "
             f"ROC-AUC={_fmt(sel_sep['eval_roc_auc'])} no eval ({_fmt(sel_sep['calib_roc_auc'])} na calibração); "
@@ -207,6 +244,19 @@ def render_report(results: dict[str, Any]) -> str:
             f"- Configurações testadas: {protocol['total_configs_tested']} (política de variações `{protocol['variations_policy']}`, gatilho AUC `< {protocol['auc_variation_trigger']}`, variações executadas: `{protocol['variations_executed']}`).",
             f"- Escolha registrada: `{selected_id}` — {results['selection_rationale']}.",
         ]
+    )
+
+    if group_audit and group_audit.get("train_val"):
+        tv = group_audit["train_val"]
+        ce = group_audit.get("calib_eval") or {}
+        lines.append(
+            f"- Auditoria por jogo/grupo: `train`={tv['groups_a']} grupos, `val`={tv['groups_b']} grupos, "
+            f"interseção `train∩val`={tv['shared_groups']} ({'split por jogo' if tv['disjoint_by_group'] else 'compartilha jogos entre train e val'}); "
+            f"`{splits['calib_split_name']}`={ce.get('groups_a', '?')} grupos vs `{splits['eval_split_name']}`={ce.get('groups_b', '?')} grupos "
+            f"(interseção={ce.get('shared_groups', '?')})."
+        )
+    lines.append(
+        f"- Status do conjunto de validação: {val_status_note or 'val.txt foi usado pelo detector para selecionar o checkpoint (não é teste virgem); a comparação relativa entre detector sozinho e detector + filtro ocorre sob o mesmo viés, mas os valores absolutos podem ser otimistas.'}"
     )
 
     val_sampling = splits.get("val_sampling") or {}

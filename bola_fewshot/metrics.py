@@ -289,3 +289,38 @@ def paired_bootstrap_diff(
         "delta_precision": summarize(fp0 - bp0, f_p - b_p),
         "delta_recall": summarize(fr0 - br0, f_r - b_r),
     }
+
+
+def paired_cluster_bootstrap_diff(
+    base_per_image: Mapping[str, Mapping[str, int]],
+    filt_per_image: Mapping[str, Mapping[str, int]],
+    image_ids: Sequence[str],
+    group_by: Mapping[str, str],
+    n_resamples: int = 2000,
+    seed: int = 42,
+) -> dict:
+    grouped_base: dict[str, dict[str, int]] = {}
+    grouped_filt: dict[str, dict[str, int]] = {}
+    for image_id in image_ids:
+        gid = group_by.get(image_id, image_id)
+        if gid not in grouped_base:
+            grouped_base[gid] = {"tp": 0, "fp": 0, "gt": 0}
+            grouped_filt[gid] = {"tp": 0, "fp": 0, "gt": 0}
+        grouped_base[gid]["tp"] += int(base_per_image[image_id]["tp"])
+        grouped_base[gid]["fp"] += int(base_per_image[image_id]["fp"])
+        grouped_base[gid]["gt"] += int(base_per_image[image_id]["gt"])
+        grouped_filt[gid]["tp"] += int(filt_per_image[image_id]["tp"])
+        grouped_filt[gid]["fp"] += int(filt_per_image[image_id]["fp"])
+        grouped_filt[gid]["gt"] += int(filt_per_image[image_id]["gt"])
+    group_ids = sorted(grouped_base.keys())
+    result = paired_bootstrap_diff(
+        grouped_base,
+        grouped_filt,
+        group_ids,
+        n_resamples=n_resamples,
+        seed=seed,
+    )
+    result["unit"] = "group"
+    result["n_groups"] = len(group_ids)
+    result["n_images"] = len(image_ids)
+    return result

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 import random
 import re
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 from PIL import Image
 import yaml
@@ -403,12 +403,31 @@ def assert_disjoint_splits(split_a: DatasetSplit, split_b: DatasetSplit) -> None
         )
 
 
+def audit_group_overlap(
+    split_a: DatasetSplit,
+    split_b: DatasetSplit,
+    group_by: Mapping[str, str],
+) -> dict:
+    groups_a = {group_by.get(r.image_id, r.image_id) for r in split_a.records}
+    groups_b = {group_by.get(r.image_id, r.image_id) for r in split_b.records}
+    shared = groups_a & groups_b
+    return {
+        "split_a": split_a.name,
+        "split_b": split_b.name,
+        "groups_a": len(groups_a),
+        "groups_b": len(groups_b),
+        "shared_groups": len(shared),
+        "disjoint_by_group": len(shared) == 0,
+    }
+
+
 def partition_split(
     split: DatasetSplit,
     first_fraction: float,
     seed: int,
     first_name: str,
     second_name: str,
+    group_by: Mapping[str, str] | None = None,
 ) -> tuple[DatasetSplit, DatasetSplit]:
     if not 0.0 < first_fraction < 1.0:
         raise ValueError("first_fraction must be strictly between 0 and 1")
@@ -416,14 +435,52 @@ def partition_split(
     if len(ordered) < 2:
         raise ValueError(f"split '{split.name}' needs at least 2 images to partition")
     rng = random.Random(seed)
-    indices = list(range(len(ordered)))
-    rng.shuffle(indices)
-    cut = max(1, min(len(ordered) - 1, int(round(len(ordered) * first_fraction))))
-    first_records = tuple(ordered[i] for i in sorted(indices[:cut]))
-    second_records = tuple(ordered[i] for i in sorted(indices[cut:]))
+    if group_by is None:
+        indices = list(range(len(ordered)))
+        rng.shuffle(indices)
+        cut = max(1, min(len(ordered) - 1, int(round(len(ordered) * first_fraction))))
+        first_records = tuple(ordered[i] for i in sorted(indices[:cut]))
+        second_records = tuple(ordered[i] for i in sorted(indices[cut:]))
+    else:
+        grouped: dict[str, list[ImageRecord]] = defaultdict(list)
+        for record in ordered:
+            grouped[group_by.get(record.image_id, record.image_id)].append(record)
+        group_ids = sorted(grouped.keys())
+        if len(group_ids) < 2:
+            raise ValueError(f"split '{split.name}' needs at least 2 groups to partition by group")
+        rng.shuffle(group_ids)
+        target_count = len(ordered) * first_fraction
+        first_list: list[ImageRecord] = []
+        second_list: list[ImageRecord] = []
+        for idx, gid in enumerate(group_ids):
+            members = grouped[gid]
+            remaining_groups = len(group_ids) - idx - 1
+            if not first_list:
+                first_list.extend(members)
+            elif remaining_groups == 0 and not second_list:
+                second_list.extend(members)
+            else:
+                after_add = len(first_list) + len(members)
+                if abs(after_add - target_count) <= abs(len(first_list) - target_count):
+                    first_list.extend(members)
+                else:
+                    second_list.extend(members)
+        if not second_list:
+            moved_gid = group_ids[-1]
+            moved_ids = {r.image_id for r in grouped[moved_gid]}
+            first_list = [r for r in first_list if r.image_id not in moved_ids]
+            second_list = list(grouped[moved_gid])
+        first_list.sort(key=lambda r: r.image_id)
+        second_list.sort(key=lambda r: r.image_id)
+        first_records = tuple(first_list)
+        second_records = tuple(second_list)
     first = DatasetSplit(name=first_name, records=first_records)
     second = DatasetSplit(name=second_name, records=second_records)
     assert_disjoint_splits(first, second)
+    if group_by is not None:
+        overlap = audit_group_overlap(first, second, group_by)
+        if not overlap["disjoint_by_group"]:
+            raise ValueError(f"group leakage detected between '{first_name}' and '{second_name}'")
     return first, second
 
 
