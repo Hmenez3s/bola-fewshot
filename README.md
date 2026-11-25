@@ -2,26 +2,25 @@
 
 Pesquisa: o FewShot-R18 remove falsos positivos de um detector de bola e melhora o detector sozinho?
 
-Pergunta: dado o detector de bola `t1b_v5_etapa1_rodada1.pt` (`Evolvera/footlabs`, release `pesos-bola-20261125`), um filtro few-shot com o FewShot-R18 sobre os crops detectados melhora precisão/F1/mAP em relação ao detector sozinho, sem derrubar o recall?
+Pergunta: dado o detector de bola `t1b_v5_etapa1_rodada1.pt` (`Evolvera/footlabs`, release `pesos-bola-20261125`), um filtro few-shot baseado no FewShot-R18 sobre os crops detectados melhora precisão/F1/mAP em relação ao detector sozinho, sem derrubar o recall?
 
-O FewShot-R18 atua exclusivamente como filtro pós-detecção: avalia cada caixa proposta pelo detector e remove os candidatos abaixo do limiar congelado. Ele não detecta bolas novas e não recupera bolas perdidas.
+O filtro atua exclusivamente em pós-detecção: avalia cada caixa proposta pelo detector e remove os candidatos abaixo do limiar congelado. Ele não detecta bolas novas e não recupera bolas perdidas.
 
-## Desenho do filtro (decisão de projeto)
+## Desenho experimental (3 braços)
 
-O FewShot-R18 (`Hmenez3s/few-shot-team-goalkeeper-assignment`, checkpoint `six-references.pth`) é uma ResNet-18 (`fc = Identity`, embedding de 512 dimensões) com `layer3` e `layer4` ajustadas para separar 4 classes de jogadores/goleiros usando crops RGB em letterbox `48x96`. Ele **não** foi treinado para bola.
+Mesmas imagens, mesmo detector (`t1b_v5_etapa1_rodada1.pt`), mesma resolução (`imgsz=1920`), mesma confiança (`conf=0.35`) e mesmo `IoU=0.50`:
 
-O protocolo implementado testa a separabilidade antes de qualquer limiar:
+1. **Braço 1 — Detector sozinho (`baseline`)**: `t1b_v5_etapa1_rodada1.pt` sem filtro.
+2. **Braço 2 — Detector + FewShot-R18 de jogadores congelado (`frozen_players`, controle)**: checkpoint `six-references.pth` (`Hmenez3s/few-shot-team-goalkeeper-assignment`), treinado apenas para 4 classes de jogadores/goleiros, avaliado com protótipos few-shot (`k=1, 6`) em `layer4` (e variações controladas `layer4_pos_minus_neg`, `layer3`, `layer2` se a AUC de calibração ficar abaixo de `0.70`).
+3. **Braço 3 — Detector + FewShot-R18-bola treinado (`trained_ball`)**: repete a receita episódica do paper (`train.py` / `six_references.py`): ResNet-18 inicializada do ImageNet (`fc = Identity`, apenas `layer3` e `layer4` treináveis, `BatchNorm2d` em `eval`), entrada letterbox RGB `48x96`, `AdamW(lr=2e-4, wd=1e-4)`, `CosineAnnealingLR`, 8 épocas × 180 episódios, seed `25`, `k_suporte=6` e `n_query=8` por classe (`{não-bola, bola}`), `logits = cosine * 20`, cross-entropy. Negativos minerados em `train.txt` com `conf >= 0.05` (e suplemento de fundo se faltar volume, com contagem declarada).
 
-1. **Hipótese principal (`layer4_positive_only`)**: sorteia `k` crops de bolas ground-truth apenas do split de treino (semente fixa), extrai embeddings L2-normalizados da `layer4` (512-d), calcula o protótipo médio normalizado e mede similaridade de cosseno para cada detecção. Mede `ROC-AUC` e `PR-AUC` (TP vs FP) antes de escolher o limiar.
-2. **Variações controladas (`--variations auto`, ativadas se a melhor `calib_roc_auc` principal ficar abaixo de `0.70`, ou com `--variations always`)**:
-   - `layer4_pos_minus_neg`: adiciona protótipo negativo a partir de falsos positivos do detector no próprio treino (`cos_pos - cos_neg`).
-   - `layer3_positive_only`: embedding intermediário `layer3` (256-d, GAP).
-   - `layer2_positive_only`: embedding `layer2` (128-d, GAP — pesos congelados do ImageNet no treino original do FewShot-R18).
-3. **Higiene de splits e limiar congelado**:
-   - Disjunção entre `train` e `val` verificada por caminho canônico (falha se houver sobreposição).
-   - Referências (`k=1, 6`) saem exclusivamente de `train`.
-   - O limiar de corte é escolhido na calibração (`val_split`: corte fixo 30%/70% do `val` declarado antes da avaliação, ou `train_holdout`) maximizando F1 e é congelado antes de abrir o conjunto final.
-   - Todas as configurações testadas ficam registradas em `results/experiment_results.json` e `RELATORIO.md`, com intervalo bootstrap pareado de 95% sobre imagens para `ΔF1`.
+### Higiene de splits e protocolo sem vazamento
+
+- Disjunção entre `train.txt` e `val.txt` verificada por caminho canônico (erro se houver sobreposição).
+- Referências few-shot (`k=1, 6`) e treino episódico saem exclusivamente de `train.txt`.
+- Como `val.txt` foi usado pelo detector para escolher o melhor checkpoint (não é teste virgem), `val.txt` é partido em duas metades fixas (50% `val_calib` / 50% `val_eval`, por jogo quando disponível): seleção de checkpoint, camada, `k` e limiar ocorre apenas em `val_calib`, congelada antes de medir `val_eval` uma única vez.
+- Intervalos de confiança de 95% via bootstrap pareado (`2000` reamostragens) sobre imagens (e sobre jogos quando o mapa de jogos está presente) para `ΔF1`.
+- Conjuntos virgens externos (`--extra-dataset`) são avaliados com protótipos e limiares congelados, sem reajuste.
 
 ## Configuração do detector
 
@@ -29,11 +28,11 @@ Parâmetros alinhados a `Evolvera/footlabs` (`server/engine/ball_detector.py`, `
 
 - Classe única: `0` (`ball`).
 - Leitura padrão do site para modelos T1b: `imgsz=1920`, `conf=0.35`, `iou=0.70`.
-- Observação do checkpoint `t1b_v5_etapa1_rodada1.pt`: `train_args.imgsz=1280` (use `--imgsz 1280` se quiser reproduzir o tamanho de treino em vez da leitura do site em `1920`).
+- O checkpoint `t1b_v5_etapa1_rodada1.pt` foi treinado com `train_args.imgsz=1280` (`--imgsz` configurável).
 
 ## Instalação e insumos
 
-Os pesos e o dataset ficam fora do git (`.gitignore`).
+Pesos e datasets ficam fora do git (`.gitignore`).
 
 ```bash
 python3.12 -m venv .venv
@@ -48,44 +47,43 @@ mkdir -p models
 gh release download pesos-bola-20261125 -R Evolvera/footlabs -p t1b_v5_etapa1_rodada1.pt -D models
 ```
 
-Opcional (segunda comparação com o peso padrão do site):
+Opcional (segunda comparação com o modelo padrão do site):
 
 ```bash
 gh release download pesos-bola-20261125 -R Evolvera/footlabs -p t1b_v4_etapa2_best.pt -D models
 ```
 
-Baixar o peso do FewShot-R18 (`six-references.pth`) do repositório `Hmenez3s/few-shot-team-goalkeeper-assignment` (ou apontar para a cópia local `models/six-references.pth`).
+Obter o checkpoint de controle `six-references.pth` de `Hmenez3s/few-shot-team-goalkeeper-assignment` (ou apontar para a cópia local).
 
 ## Execução (um comando do detector ao relatório)
 
-No Windows (Dense, somente leitura no dataset, saída em pasta própria `C:\bola_fewshot_run`):
+Com os dados copiados localmente em `/Users/j.henrique/bola-fewshot-data` (remapeando o prefixo Windows sem alterar os arquivos originais):
 
-```powershell
-python run_experiment.py `
-  --data-yaml C:\Footlabs_Miguel_cache\item488_t1b_v5_dataset_r5_9010\data.yaml `
-  --images-root C:\Footlabs_Miguel_cache\item488_t1b_v5_dataset_r1\images `
-  --labels-root C:\Footlabs_Miguel_cache\item488_t1b_v5_dataset_r1\labels `
-  --detector-weights models\t1b_v5_etapa1_rodada1.pt `
-  --fewshot-weights models\six-references.pth `
-  --imgsz 1920 `
-  --conf 0.35 `
-  --k-values 1 6 `
-  --seed 42 `
-  --calib-source val_split `
-  --calib-fraction 0.30 `
-  --bootstrap-resamples 2000 `
-  --cache-dir C:\bola_fewshot_run\cache `
-  --output-dir results `
+```bash
+.venv/bin/python run_experiment.py \
+  --data-yaml /Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r5_9010/data.yaml \
+  --remap-prefix C:/Footlabs_Miguel_cache=/Users/j.henrique/bola-fewshot-data \
+  --detector-weights models/t1b_v5_etapa1_rodada1.pt \
+  --fewshot-weights /Users/j.henrique/four-reference-team-classifier/models/six-references.pth \
+  --imagenet-weights /Users/j.henrique/four-reference-team-classifier/data/inputs/resnet18.pth \
+  --train-ball-arm \
+  --imgsz 1920 \
+  --conf 0.35 \
+  --k-values 1 6 \
+  --seed 42 \
+  --train-seed 25 \
+  --calib-source val_split \
+  --calib-fraction 0.50 \
+  --bootstrap-resamples 2000 \
+  --device mps \
+  --cache-dir .tmp/cache_v5_1920 \
+  --output-dir results \
   --report-path RELATORIO.md
 ```
 
-Se o conjunto de câmera amadora (`box2boxcam`) estiver acessível, adicione:
-
-```text
---extra-dataset box2boxcam=CAMINHO\PARA\box2boxcam\data.yaml
-```
-
-O comando aplica o filtro e o limiar já congelados sobre `box2boxcam`, sem reajustar parâmetros, e grava `results/experiment_results.json` e `RELATORIO.md`.
+Opções adicionais úteis:
+- `--group-map-json <arquivo.json>`: força partição 50/50 por jogo e adiciona bootstrap por jogo.
+- `--extra-dataset NOME=CAMINHO/data.yaml` ou `--extra-val-list NOME=CAMINHO/lista.txt`: avalia conjuntos extras com protótipos e limiares congelados.
 
 ## Testes
 
