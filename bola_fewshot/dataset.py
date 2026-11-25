@@ -52,6 +52,8 @@ def _resolve_entry_path(raw: str, base_dirs: Sequence[Path]) -> Path:
         joined = base / candidate
         if joined.exists():
             return joined
+    if candidate.exists():
+        return candidate.resolve()
     return base_dirs[0] / candidate
 
 
