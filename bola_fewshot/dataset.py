@@ -1,0 +1,344 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path, PureWindowsPath
+import random
+from typing import Iterable, Sequence
+
+from PIL import Image
+import yaml
+
+IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"})
+
+
+@dataclass(frozen=True)
+class ImageRecord:
+    image_id: str
+    image_path: Path
+    label_path: Path | None
+    width: int
+    height: int
+    gt_boxes: tuple[tuple[float, float, float, float], ...]
+
+
+@dataclass(frozen=True)
+class DatasetSplit:
+    name: str
+    records: tuple[ImageRecord, ...]
+
+    @property
+    def image_ids(self) -> tuple[str, ...]:
+        return tuple(record.image_id for record in self.records)
+
+    def gt_by_image(self) -> dict[str, list[tuple[float, float, float, float]]]:
+        return {record.image_id: list(record.gt_boxes) for record in self.records}
+
+
+def _normalize_path_text(raw: str) -> Path:
+    text = raw.strip()
+    if "\\" in text and "/" not in text:
+        win = PureWindowsPath(text)
+        if win.drive:
+            return Path(text)
+        return Path(*win.parts)
+    return Path(text)
+
+
+def _resolve_entry_path(raw: str, base_dirs: Sequence[Path]) -> Path:
+    candidate = _normalize_path_text(raw)
+    if candidate.is_absolute():
+        return candidate
+    for base in base_dirs:
+        joined = base / candidate
+        if joined.exists():
+            return joined
+    return base_dirs[0] / candidate
+
+
+def _collect_image_paths(
+    entry: str | Sequence[str],
+    base_dirs: Sequence[Path],
+    images_root: Path | None = None,
+) -> list[Path]:
+    items = [entry] if isinstance(entry, str) else list(entry)
+    collected: list[Path] = []
+    search_bases = list(base_dirs)
+    if images_root is not None:
+        search_bases.insert(0, images_root)
+    for item in items:
+        resolved = _resolve_entry_path(str(item), search_bases)
+        if resolved.is_file() and resolved.suffix.lower() == ".txt":
+            txt_bases = [resolved.parent, *search_bases]
+            for line in resolved.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                img_path = _resolve_entry_path(stripped, txt_bases)
+                if not img_path.exists() and images_root is not None:
+                    alt = images_root / Path(stripped.replace("\\", "/")).name
+                    if alt.exists():
+                        img_path = alt
+                collected.append(img_path)
+        elif resolved.is_dir():
+            for path in sorted(resolved.rglob("*")):
+                if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
+                    collected.append(path)
+        elif resolved.is_file() and resolved.suffix.lower() in IMAGE_EXTENSIONS:
+            collected.append(resolved)
+        else:
+            raise FileNotFoundError(f"dataset split entry not found: {item} (resolved: {resolved})")
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for path in collected:
+        canonical = path.resolve()
+        if canonical not in seen:
+            seen.add(canonical)
+            unique.append(canonical)
+    return unique
+
+
+def resolve_label_path(
+    image_path: Path,
+    images_root: Path | None = None,
+    labels_root: Path | None = None,
+) -> Path | None:
+    if labels_root is not None:
+        if images_root is not None:
+            try:
+                rel = image_path.resolve().relative_to(images_root.resolve())
+                candidate = (labels_root / rel).with_suffix(".txt")
+                if candidate.is_file():
+                    return candidate
+            except ValueError:
+                pass
+        direct = labels_root / f"{image_path.stem}.txt"
+        if direct.is_file():
+            return direct
+    parts = list(image_path.parts)
+    for idx in range(len(parts) - 1, -1, -1):
+        if parts[idx].lower() == "images":
+            replaced = list(parts)
+            replaced[idx] = "labels"
+            candidate = Path(*replaced).with_suffix(".txt")
+            if candidate.is_file():
+                return candidate
+            break
+    sibling = image_path.parent.parent / "labels" / f"{image_path.stem}.txt"
+    if sibling.is_file():
+        return sibling
+    beside = image_path.with_suffix(".txt")
+    if beside.is_file():
+        return beside
+    return None
+
+
+def parse_yolo_labels(
+    label_path: Path | None,
+    width: int,
+    height: int,
+    target_class: int = 0,
+) -> tuple[tuple[float, float, float, float], ...]:
+    if label_path is None or not label_path.is_file():
+        return ()
+    boxes: list[tuple[float, float, float, float]] = []
+    for line in label_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        tokens = stripped.split()
+        if len(tokens) < 5:
+            continue
+        cls_id = int(float(tokens[0]))
+        if cls_id != target_class:
+            continue
+        cx, cy, bw, bh = (float(tokens[i]) for i in range(1, 5))
+        x1 = max(0.0, min(float(width), (cx - bw / 2.0) * width))
+        y1 = max(0.0, min(float(height), (cy - bh / 2.0) * height))
+        x2 = max(0.0, min(float(width), (cx + bw / 2.0) * width))
+        y2 = max(0.0, min(float(height), (cy + bh / 2.0) * height))
+        if x2 > x1 and y2 > y1:
+            boxes.append((x1, y1, x2, y2))
+    return tuple(boxes)
+
+
+def _make_image_id(image_path: Path, anchor_root: Path | None) -> str:
+    if anchor_root is not None:
+        try:
+            return image_path.resolve().relative_to(anchor_root.resolve()).as_posix()
+        except ValueError:
+            pass
+    return f"{image_path.parent.name}/{image_path.name}"
+
+
+def _build_split(
+    name: str,
+    image_paths: Sequence[Path],
+    anchor_root: Path | None,
+    images_root: Path | None,
+    labels_root: Path | None,
+    target_class: int,
+) -> DatasetSplit:
+    records: list[ImageRecord] = []
+    seen_ids: set[str] = set()
+    for path in image_paths:
+        if not path.is_file():
+            raise FileNotFoundError(f"image not found: {path}")
+        with Image.open(path) as img:
+            width, height = img.size
+        label_path = resolve_label_path(path, images_root=images_root, labels_root=labels_root)
+        gt_boxes = parse_yolo_labels(label_path, width, height, target_class=target_class)
+        image_id = _make_image_id(path, anchor_root)
+        if image_id in seen_ids:
+            image_id = path.resolve().as_posix()
+        seen_ids.add(image_id)
+        records.append(
+            ImageRecord(
+                image_id=image_id,
+                image_path=path,
+                label_path=label_path,
+                width=width,
+                height=height,
+                gt_boxes=gt_boxes,
+            )
+        )
+    return DatasetSplit(name=name, records=tuple(records))
+
+
+def load_yolo_dataset(
+    data_yaml: Path,
+    *,
+    images_root: Path | None = None,
+    labels_root: Path | None = None,
+    target_class: int = 0,
+    require_train: bool = True,
+) -> dict[str, DatasetSplit]:
+    yaml_path = Path(data_yaml).resolve()
+    if not yaml_path.is_file():
+        raise FileNotFoundError(f"data.yaml not found: {yaml_path}")
+    config = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        raise ValueError(f"invalid data.yaml mapping: {yaml_path}")
+    base_dirs: list[Path] = []
+    raw_root = config.get("path")
+    if raw_root:
+        root_path = _normalize_path_text(str(raw_root))
+        if not root_path.is_absolute():
+            root_path = (yaml_path.parent / root_path).resolve()
+        base_dirs.append(root_path)
+    base_dirs.append(yaml_path.parent)
+    anchor_root = images_root.resolve() if images_root is not None else base_dirs[0]
+
+    splits: dict[str, DatasetSplit] = {}
+    for split_name in ("train", "val", "test"):
+        entry = config.get(split_name)
+        if entry is None:
+            continue
+        paths = _collect_image_paths(entry, base_dirs, images_root=images_root)
+        splits[split_name] = _build_split(
+            split_name,
+            paths,
+            anchor_root=anchor_root,
+            images_root=images_root,
+            labels_root=labels_root,
+            target_class=target_class,
+        )
+
+    if require_train and "train" not in splits:
+        raise ValueError(f"data.yaml missing required 'train' split: {yaml_path}")
+    if "val" not in splits and "test" not in splits:
+        raise ValueError(f"data.yaml missing 'val' or 'test' split: {yaml_path}")
+
+    if "train" in splits and "val" in splits:
+        assert_disjoint_splits(splits["train"], splits["val"])
+    if "train" in splits and "test" in splits:
+        assert_disjoint_splits(splits["train"], splits["test"])
+    if "val" in splits and "test" in splits:
+        assert_disjoint_splits(splits["val"], splits["test"])
+    return splits
+
+
+def load_image_folder_split(
+    name: str,
+    images_dir: Path,
+    labels_dir: Path | None = None,
+    target_class: int = 0,
+) -> DatasetSplit:
+    resolved_dir = Path(images_dir).resolve()
+    if not resolved_dir.is_dir():
+        raise FileNotFoundError(f"images directory not found: {resolved_dir}")
+    paths = [
+        path.resolve()
+        for path in sorted(resolved_dir.rglob("*"))
+        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+    ]
+    return _build_split(
+        name,
+        paths,
+        anchor_root=resolved_dir,
+        images_root=resolved_dir,
+        labels_root=labels_dir.resolve() if labels_dir is not None else None,
+        target_class=target_class,
+    )
+
+
+def assert_disjoint_splits(split_a: DatasetSplit, split_b: DatasetSplit) -> None:
+    paths_a = {record.image_path.resolve() for record in split_a.records}
+    paths_b = {record.image_path.resolve() for record in split_b.records}
+    overlap = paths_a & paths_b
+    if overlap:
+        sample = sorted(str(p) for p in overlap)[:3]
+        raise ValueError(
+            f"data leakage detected: {len(overlap)} overlapping images between "
+            f"'{split_a.name}' and '{split_b.name}': {sample}"
+        )
+
+
+def partition_split(
+    split: DatasetSplit,
+    first_fraction: float,
+    seed: int,
+    first_name: str,
+    second_name: str,
+) -> tuple[DatasetSplit, DatasetSplit]:
+    if not 0.0 < first_fraction < 1.0:
+        raise ValueError("first_fraction must be strictly between 0 and 1")
+    ordered = sorted(split.records, key=lambda r: r.image_id)
+    if len(ordered) < 2:
+        raise ValueError(f"split '{split.name}' needs at least 2 images to partition")
+    rng = random.Random(seed)
+    indices = list(range(len(ordered)))
+    rng.shuffle(indices)
+    cut = max(1, min(len(ordered) - 1, int(round(len(ordered) * first_fraction))))
+    first_records = tuple(ordered[i] for i in sorted(indices[:cut]))
+    second_records = tuple(ordered[i] for i in sorted(indices[cut:]))
+    first = DatasetSplit(name=first_name, records=first_records)
+    second = DatasetSplit(name=second_name, records=second_records)
+    assert_disjoint_splits(first, second)
+    return first, second
+
+
+def crop_box(
+    image: Image.Image,
+    box_xyxy: Sequence[float],
+    *,
+    context_scale: float = 1.0,
+    square: bool = False,
+) -> Image.Image:
+    width, height = image.size
+    x1, y1, x2, y2 = (float(v) for v in box_xyxy)
+    cx = (x1 + x2) / 2.0
+    cy = (y1 + y2) / 2.0
+    bw = max(1.0, x2 - x1) * context_scale
+    bh = max(1.0, y2 - y1) * context_scale
+    if square:
+        side = max(bw, bh)
+        bw, bh = side, side
+    left = max(0, min(width - 1, int(round(cx - bw / 2.0))))
+    top = max(0, min(height - 1, int(round(cy - bh / 2.0))))
+    right = max(left + 1, min(width, int(round(cx + bw / 2.0))))
+    bottom = max(top + 1, min(height, int(round(cy + bh / 2.0))))
+    return image.crop((left, top, right, bottom)).convert("RGB")
+
+
+def count_gt_boxes(records: Iterable[ImageRecord]) -> int:
+    return sum(len(record.gt_boxes) for record in records)
