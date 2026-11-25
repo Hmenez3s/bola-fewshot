@@ -16,8 +16,10 @@ from bola_fewshot.dataset import (
     assert_disjoint_splits,
     count_gt_boxes,
     crop_box,
+    load_image_list_split,
     load_yolo_dataset,
     partition_split,
+    stratified_sample_split,
 )
 from bola_fewshot.detector import BallDetectorProtocol, Detection, YoloBallDetector
 from bola_fewshot.fewshot_filter import FewShotR18Encoder, PrototypeFilter, calibrate_threshold
@@ -48,6 +50,9 @@ class ExperimentConfig:
     report_path: Path
     images_root: Path | None = None
     labels_root: Path | None = None
+    path_remap: tuple[str, str] | None = None
+    val_list_override: Path | None = None
+    max_val_images: int | None = None
     imgsz: int = 1920
     conf: float = 0.35
     iou: float = 0.70
@@ -69,6 +74,7 @@ class ExperimentConfig:
     batch_size: int = 1
     cache_dir: Path | None = None
     extra_datasets: tuple[tuple[str, Path], ...] = ()
+    extra_val_lists: tuple[tuple[str, Path], ...] = ()
 
 
 PRIMARY_VARIANT = FilterVariantSpec(
@@ -381,10 +387,11 @@ def _evaluate_configuration(
     return entry, proto_filter, frozen_threshold
 
 
-def _evaluate_extra_dataset(
+def _evaluate_extra_split(
     *,
     dataset_name: str,
-    data_yaml: Path,
+    source_desc: str,
+    split: DatasetSplit,
     detector: BallDetectorProtocol,
     encoder: FewShotR18Encoder,
     chosen_entry: dict,
@@ -392,12 +399,6 @@ def _evaluate_extra_dataset(
     frozen_threshold: float,
     config: ExperimentConfig,
 ) -> dict:
-    extra_splits = load_yolo_dataset(
-        data_yaml,
-        target_class=config.target_class,
-        require_train=False,
-    )
-    split = extra_splits.get("val") or extra_splits["test"]
     cache_path = config.cache_dir / f"dets_{dataset_name}.json" if config.cache_dir else None
     dets_by_image = detector.predict_records(split.records, cache_path=cache_path)
     base_metrics = evaluate_detections(
@@ -436,7 +437,7 @@ def _evaluate_extra_dataset(
     return {
         "name": dataset_name,
         "status": "measured",
-        "data_yaml": str(data_yaml),
+        "data_yaml": source_desc,
         "applied_config_id": chosen_entry["config_id"],
         "frozen_threshold": frozen_threshold,
         "baseline": _strip_per_image(base_metrics),
@@ -452,6 +453,39 @@ def _evaluate_extra_dataset(
         "delta_map50_95": float(filt_metrics["map50_95"] - base_metrics["map50_95"]),
         "bootstrap": bootstrap,
     }
+
+
+def _evaluate_extra_dataset(
+    *,
+    dataset_name: str,
+    data_yaml: Path,
+    detector: BallDetectorProtocol,
+    encoder: FewShotR18Encoder,
+    chosen_entry: dict,
+    chosen_filter: PrototypeFilter,
+    frozen_threshold: float,
+    config: ExperimentConfig,
+) -> dict:
+    extra_splits = load_yolo_dataset(
+        data_yaml,
+        images_root=config.images_root,
+        labels_root=config.labels_root,
+        path_remap=config.path_remap,
+        target_class=config.target_class,
+        require_train=False,
+    )
+    split = extra_splits.get("val") or extra_splits["test"]
+    return _evaluate_extra_split(
+        dataset_name=dataset_name,
+        source_desc=str(data_yaml),
+        split=split,
+        detector=detector,
+        encoder=encoder,
+        chosen_entry=chosen_entry,
+        chosen_filter=chosen_filter,
+        frozen_threshold=frozen_threshold,
+        config=config,
+    )
 
 
 def run_experiment(
@@ -471,12 +505,29 @@ def run_experiment(
         config.data_yaml,
         images_root=config.images_root,
         labels_root=config.labels_root,
+        path_remap=config.path_remap,
         target_class=config.target_class,
         require_train=True,
     )
     train_full = splits["train"]
-    val_full = splits["val"]
+    if config.val_list_override is not None:
+        val_full = load_image_list_split(
+            "val",
+            config.val_list_override,
+            images_root=config.images_root,
+            labels_root=config.labels_root,
+            path_remap=config.path_remap,
+            target_class=config.target_class,
+        )
+    else:
+        val_full = splits["val"]
     assert_disjoint_splits(train_full, val_full)
+
+    val_full, val_sampling = stratified_sample_split(
+        val_full,
+        max_images=config.max_val_images or 0,
+        seed=config.seed + 5,
+    )
 
     if config.calib_source == "val_split":
         train_ref = train_full
@@ -687,6 +738,29 @@ def run_experiment(
                 config=config,
             )
         )
+    for list_name, list_path in config.extra_val_lists:
+        extra_split = load_image_list_split(
+            list_name,
+            list_path,
+            images_root=config.images_root,
+            labels_root=config.labels_root,
+            path_remap=config.path_remap,
+            target_class=config.target_class,
+        )
+        assert_disjoint_splits(train_ref, extra_split)
+        extra_results.append(
+            _evaluate_extra_split(
+                dataset_name=list_name,
+                source_desc=str(list_path),
+                split=extra_split,
+                detector=det_runner,
+                encoder=enc,
+                chosen_entry=chosen_entry,
+                chosen_filter=chosen_filter,
+                frozen_threshold=chosen_threshold,
+                config=config,
+            )
+        )
 
     warnings: list[str] = []
     if calib_base_metrics["fp"] < 10:
@@ -728,6 +802,8 @@ def run_experiment(
             "train_ref_images": len(train_ref.records),
             "train_ref_gt_balls": count_gt_boxes(train_ref.records),
             "val_total_images": len(val_full.records),
+            "val_list_source": str(config.val_list_override) if config.val_list_override else "data.yaml:val",
+            "val_sampling": val_sampling,
             "calib_split_name": calib_split.name,
             "calib_images": len(calib_split.records),
             "calib_gt_balls": count_gt_boxes(calib_split.records),

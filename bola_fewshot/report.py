@@ -200,7 +200,7 @@ def render_report(results: dict[str, Any]) -> str:
             "",
             "## Protocolo, higiene de splits e escolhas",
             "",
-            f"- Fonte dos splits: `{protocol['data_yaml']}` (disjunção treino/val verificada: `{splits['train_val_disjoint_verified']}`).",
+            f"- Fonte dos splits: `{protocol['data_yaml']}` (lista de validação: `{splits.get('val_list_source', 'data.yaml:val')}`; disjunção treino/val verificada: `{splits['train_val_disjoint_verified']}`).",
             f"- Referências do filtro: sorteadas automaticamente apenas do treino (`train_ref`: {splits['train_ref_images']} imagens, {splits['train_ref_gt_balls']} bolas GT) com seed fixa `{protocol['seed']}`.",
             f"- Calibração do limiar: `{protocol['calib_source']}` (`{splits['calib_split_name']}`, {splits['calib_images']} imagens, fração `{protocol['calib_fraction']}`). Limiar congelado antes de tocar `{splits['eval_split_name']}` ({splits['eval_images']} imagens).",
             f"- Pré-processamento do crop: canvas letterbox `{protocol['canvas_wh']}`, `context_scale={protocol['context_scale']}`, `square_crop={protocol['square_crop']}`.",
@@ -208,6 +208,14 @@ def render_report(results: dict[str, Any]) -> str:
             f"- Escolha registrada: `{selected_id}` — {results['selection_rationale']}.",
         ]
     )
+
+    val_sampling = splits.get("val_sampling") or {}
+    if val_sampling.get("subsampled"):
+        lines.append(
+            f"- Amostragem estratificada de `val`: {val_sampling['sampled_images']}/{val_sampling['original_images']} "
+            f"imagens (seed `{val_sampling['seed']}`, {val_sampling.get('n_strata', '?')} estratos, "
+            f"{val_sampling.get('sampled_pos_images', '?')}/{val_sampling.get('original_pos_images', '?')} imagens com bola)."
+        )
 
     if protocol["skipped_variants"]:
         lines.append("")

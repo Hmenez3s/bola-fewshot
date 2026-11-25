@@ -6,6 +6,15 @@ from pathlib import Path
 from bola_fewshot.experiment import ExperimentConfig, run_experiment
 
 
+def _parse_remap(spec: str) -> tuple[str, str]:
+    if "=" not in spec:
+        raise argparse.ArgumentTypeError("remap-prefix must have format OLD_PREFIX=NEW_PREFIX")
+    old_p, new_p = spec.split("=", 1)
+    if not old_p.strip() or not new_p.strip():
+        raise argparse.ArgumentTypeError("remap-prefix requires non-empty old and new prefixes")
+    return old_p.strip(), new_p.strip()
+
+
 def _parse_extra_dataset(spec: str) -> tuple[str, Path]:
     if "=" not in spec:
         raise argparse.ArgumentTypeError("extra dataset must have format NAME=PATH_TO_DATA_YAML")
@@ -38,6 +47,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--report-path", type=Path, default=Path("RELATORIO.md"))
     parser.add_argument("--images-root", type=Path, default=None)
     parser.add_argument("--labels-root", type=Path, default=None)
+    parser.add_argument("--remap-prefix", type=_parse_remap, default=None)
+    parser.add_argument("--val-list", type=Path, default=None)
+    parser.add_argument("--max-val-images", type=int, default=None)
     parser.add_argument("--imgsz", type=int, default=1920)
     parser.add_argument("--conf", type=float, default=0.35)
     parser.add_argument("--iou", type=float, default=0.70)
@@ -72,6 +84,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
     )
+    parser.add_argument(
+        "--extra-val-list",
+        type=_parse_extra_dataset,
+        action="append",
+        default=[],
+    )
     return parser
 
 
@@ -85,6 +103,9 @@ def main(argv: list[str] | None = None) -> int:
         report_path=args.report_path,
         images_root=args.images_root,
         labels_root=args.labels_root,
+        path_remap=args.remap_prefix,
+        val_list_override=args.val_list,
+        max_val_images=args.max_val_images,
         imgsz=args.imgsz,
         conf=args.conf,
         iou=args.iou,
@@ -106,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         batch_size=args.batch_size,
         cache_dir=args.cache_dir,
         extra_datasets=tuple(args.extra_dataset),
+        extra_val_lists=tuple(args.extra_val_list),
     )
     results = run_experiment(config)
     selected_id = results["selected_config_id"]

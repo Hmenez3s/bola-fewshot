@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import time
 from typing import Protocol, Sequence
 
 import torch
@@ -135,7 +136,10 @@ class YoloBallDetector:
 
         model = self._load_model()
         output: dict[str, list[Detection]] = {}
-        for start in range(0, len(records), self.batch_size):
+        total = len(records)
+        t0 = time.monotonic()
+        last_log = t0
+        for start in range(0, total, self.batch_size):
             chunk = records[start : start + self.batch_size]
             sources = [str(record.image_path) for record in chunk]
             results = model.predict(
@@ -174,6 +178,18 @@ class YoloBallDetector:
                         )
                 items.sort(key=lambda d: -d.conf)
                 output[record.image_id] = items
+            done = min(total, start + len(chunk))
+            now = time.monotonic()
+            if total >= 50 and (done == total or now - last_log >= 30.0):
+                elapsed = max(1e-6, now - t0)
+                rate = done / elapsed
+                eta = (total - done) / rate if rate > 0 else 0.0
+                print(
+                    f"detector[{self.weights_path.name}@{self.imgsz}]: "
+                    f"{done}/{total} imgs ({rate:.2f} img/s, elapsed={elapsed:.1f}s, eta={eta:.1f}s)",
+                    flush=True,
+                )
+                last_log = now
 
         if cache_path is not None:
             self._save_cache(cache_path, records, output)

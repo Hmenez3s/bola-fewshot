@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 import random
+import re
 from typing import Iterable, Sequence
 
 from PIL import Image
 import yaml
 
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"})
+WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[/\\]")
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,21 @@ class DatasetSplit:
         return {record.image_id: list(record.gt_boxes) for record in self.records}
 
 
+def _apply_path_remap(raw: str, path_remap: tuple[str, str] | None) -> str:
+    text = raw.strip()
+    if path_remap is None:
+        return text
+    old_prefix, new_prefix = path_remap
+    norm_text = text.replace("\\", "/")
+    norm_old = old_prefix.replace("\\", "/").rstrip("/")
+    norm_new = new_prefix.replace("\\", "/").rstrip("/")
+    if norm_text.lower() == norm_old.lower():
+        return norm_new
+    if norm_text.lower().startswith(norm_old.lower() + "/"):
+        return norm_new + norm_text[len(norm_old) :]
+    return text
+
+
 def _normalize_path_text(raw: str) -> Path:
     text = raw.strip()
     if "\\" in text and "/" not in text:
@@ -44,23 +62,67 @@ def _normalize_path_text(raw: str) -> Path:
     return Path(text)
 
 
-def _resolve_entry_path(raw: str, base_dirs: Sequence[Path]) -> Path:
-    candidate = _normalize_path_text(raw)
-    if candidate.is_absolute():
+def _match_images_root(raw: str, images_root: Path | None) -> Path | None:
+    if images_root is None:
+        return None
+    norm = raw.strip().replace("\\", "/")
+    lower = norm.lower()
+    marker = "/images/"
+    idx = lower.rfind(marker)
+    if idx != -1:
+        rel_after_images = norm[idx + len(marker) :]
+        candidate = images_root / rel_after_images
+        if candidate.exists():
+            return candidate
+        parts = rel_after_images.split("/")
+        if len(parts) > 1 and images_root.name.lower() == parts[0].lower():
+            candidate_trimmed = images_root / "/".join(parts[1:])
+            if candidate_trimmed.exists():
+                return candidate_trimmed
+    filename = norm.rsplit("/", 1)[-1]
+    direct = images_root / filename
+    if direct.exists():
+        return direct
+    in_train = images_root / "train" / filename
+    if in_train.exists():
+        return in_train
+    return None
+
+
+def _resolve_entry_path(
+    raw: str,
+    base_dirs: Sequence[Path],
+    *,
+    images_root: Path | None = None,
+    path_remap: tuple[str, str] | None = None,
+) -> Path:
+    remapped = _apply_path_remap(raw, path_remap)
+    candidate = _normalize_path_text(remapped)
+    if candidate.is_absolute() and candidate.exists():
         return candidate
-    for base in base_dirs:
-        joined = base / candidate
-        if joined.exists():
-            return joined
-    if candidate.exists():
-        return candidate.resolve()
+    if not WINDOWS_DRIVE_RE.match(remapped):
+        if candidate.is_absolute():
+            return candidate
+        for base in base_dirs:
+            joined = base / candidate
+            if joined.exists():
+                return joined
+        if candidate.exists():
+            return candidate.resolve()
+    matched = _match_images_root(remapped, images_root)
+    if matched is not None:
+        return matched
+    if WINDOWS_DRIVE_RE.match(remapped):
+        return Path(remapped)
     return base_dirs[0] / candidate
 
 
 def _collect_image_paths(
     entry: str | Sequence[str],
     base_dirs: Sequence[Path],
+    *,
     images_root: Path | None = None,
+    path_remap: tuple[str, str] | None = None,
 ) -> list[Path]:
     items = [entry] if isinstance(entry, str) else list(entry)
     collected: list[Path] = []
@@ -68,18 +130,24 @@ def _collect_image_paths(
     if images_root is not None:
         search_bases.insert(0, images_root)
     for item in items:
-        resolved = _resolve_entry_path(str(item), search_bases)
+        resolved = _resolve_entry_path(
+            str(item),
+            search_bases,
+            images_root=images_root,
+            path_remap=path_remap,
+        )
         if resolved.is_file() and resolved.suffix.lower() == ".txt":
             txt_bases = [resolved.parent, *search_bases]
             for line in resolved.read_text(encoding="utf-8").splitlines():
                 stripped = line.strip()
                 if not stripped or stripped.startswith("#"):
                     continue
-                img_path = _resolve_entry_path(stripped, txt_bases)
-                if not img_path.exists() and images_root is not None:
-                    alt = images_root / Path(stripped.replace("\\", "/")).name
-                    if alt.exists():
-                        img_path = alt
+                img_path = _resolve_entry_path(
+                    stripped,
+                    txt_bases,
+                    images_root=images_root,
+                    path_remap=path_remap,
+                )
                 collected.append(img_path)
         elif resolved.is_dir():
             for path in sorted(resolved.rglob("*")):
@@ -116,6 +184,9 @@ def resolve_label_path(
         direct = labels_root / f"{image_path.stem}.txt"
         if direct.is_file():
             return direct
+        in_parent = labels_root / image_path.parent.name / f"{image_path.stem}.txt"
+        if in_parent.is_file():
+            return in_parent
     parts = list(image_path.parts)
     for idx in range(len(parts) - 1, -1, -1):
         if parts[idx].lower() == "images":
@@ -206,11 +277,41 @@ def _build_split(
     return DatasetSplit(name=name, records=tuple(records))
 
 
+def load_image_list_split(
+    name: str,
+    list_path: Path,
+    *,
+    images_root: Path | None = None,
+    labels_root: Path | None = None,
+    path_remap: tuple[str, str] | None = None,
+    target_class: int = 0,
+) -> DatasetSplit:
+    resolved_list = Path(list_path).resolve()
+    if not resolved_list.is_file():
+        raise FileNotFoundError(f"image list not found: {resolved_list}")
+    paths = _collect_image_paths(
+        str(resolved_list),
+        [resolved_list.parent],
+        images_root=images_root,
+        path_remap=path_remap,
+    )
+    anchor_root = images_root.resolve() if images_root is not None else resolved_list.parent
+    return _build_split(
+        name,
+        paths,
+        anchor_root=anchor_root,
+        images_root=images_root,
+        labels_root=labels_root,
+        target_class=target_class,
+    )
+
+
 def load_yolo_dataset(
     data_yaml: Path,
     *,
     images_root: Path | None = None,
     labels_root: Path | None = None,
+    path_remap: tuple[str, str] | None = None,
     target_class: int = 0,
     require_train: bool = True,
 ) -> dict[str, DatasetSplit]:
@@ -223,10 +324,12 @@ def load_yolo_dataset(
     base_dirs: list[Path] = []
     raw_root = config.get("path")
     if raw_root:
-        root_path = _normalize_path_text(str(raw_root))
+        remapped_root = _apply_path_remap(str(raw_root), path_remap)
+        root_path = _normalize_path_text(remapped_root)
         if not root_path.is_absolute():
             root_path = (yaml_path.parent / root_path).resolve()
-        base_dirs.append(root_path)
+        if root_path.exists():
+            base_dirs.append(root_path)
     base_dirs.append(yaml_path.parent)
     anchor_root = images_root.resolve() if images_root is not None else base_dirs[0]
 
@@ -235,7 +338,12 @@ def load_yolo_dataset(
         entry = config.get(split_name)
         if entry is None:
             continue
-        paths = _collect_image_paths(entry, base_dirs, images_root=images_root)
+        paths = _collect_image_paths(
+            entry,
+            base_dirs,
+            images_root=images_root,
+            path_remap=path_remap,
+        )
         splits[split_name] = _build_split(
             split_name,
             paths,
@@ -317,6 +425,56 @@ def partition_split(
     second = DatasetSplit(name=second_name, records=second_records)
     assert_disjoint_splits(first, second)
     return first, second
+
+
+def stratified_sample_split(
+    split: DatasetSplit,
+    max_images: int,
+    seed: int,
+) -> tuple[DatasetSplit, dict]:
+    total = len(split.records)
+    if max_images <= 0 or max_images >= total:
+        return split, {
+            "subsampled": False,
+            "original_images": total,
+            "sampled_images": total,
+            "seed": seed,
+        }
+    strata: dict[tuple[str, bool], list[ImageRecord]] = defaultdict(list)
+    for record in sorted(split.records, key=lambda r: r.image_id):
+        stem = record.image_path.stem
+        prefix = stem.split("_", 1)[0] if "_" in stem else "default"
+        strata[(prefix, len(record.gt_boxes) > 0)].append(record)
+
+    rng = random.Random(seed)
+    keys = sorted(strata.keys())
+    raw_alloc = {k: len(strata[k]) * max_images / total for k in keys}
+    alloc = {k: min(len(strata[k]), int(raw_alloc[k])) for k in keys}
+    remainder = max_images - sum(alloc.values())
+    order_rem = sorted(keys, key=lambda k: (-(raw_alloc[k] - alloc[k]), k))
+    for k in order_rem:
+        if remainder <= 0:
+            break
+        if alloc[k] < len(strata[k]):
+            alloc[k] += 1
+            remainder -= 1
+
+    chosen: list[ImageRecord] = []
+    for k in keys:
+        group = list(strata[k])
+        rng.shuffle(group)
+        chosen.extend(group[: alloc[k]])
+    chosen.sort(key=lambda r: r.image_id)
+    sampled = DatasetSplit(name=split.name, records=tuple(chosen))
+    return sampled, {
+        "subsampled": True,
+        "original_images": total,
+        "sampled_images": len(chosen),
+        "n_strata": len(keys),
+        "seed": seed,
+        "original_pos_images": sum(1 for r in split.records if r.gt_boxes),
+        "sampled_pos_images": sum(1 for r in chosen if r.gt_boxes),
+    }
 
 
 def crop_box(
