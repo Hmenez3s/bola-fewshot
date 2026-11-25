@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.tmp/
+models/
+datasets/
+data/
+*.pt
+*.pth
+*.onnx
+*.mlpackage/
+.DS_Store
