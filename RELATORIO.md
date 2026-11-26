@@ -1,15 +1,164 @@
-# Relatório: Detector de bola + filtro FewShot-R18 (Rodada 1 e Rodada 2)
+# Relatório: Detector de bola + filtro FewShot-R18 (Rodadas 1, 2 e 3)
 
-## Resumo (8 linhas)
+## Resumo (8 linhas — Rodada 1 vs Rodada 2 vs Rodada 3)
 
-1. Veredito (Rodada 1 vs Rodada 2): A conclusão MUDOU na Rodada 2: com contexto ampliado, CV de 5 dobras por jogo e treino completo em train.txt, FewShot-R18-bola (treinado layer3/4) obteve melhora distinguível de zero (ΔF1=+0.0066, contra ΔF1=-0.0220 na Rodada 1).
-2. Correções aplicadas na Rodada 2: recorte quadrado `96x96` com `context_scale` ∈ `[2.0, 3.0, 4.0]` escolhido só na calibração (`2×` escolhido em 4/5 dobras, `3×` em 1/5), CV aninhada de 5 dobras por jogo sobre todo o `val.txt` (3247 imagens, 793 jogos; `train∩val=0`), mineração em todo o `train.txt` (32852 imagens) e 5760 episódios.
-3. Métricas OOF na Rodada 2 (todo `val.txt`, imgsz=1920, conf=0.35): Base P=0.7535/R=0.6811/F1=0.7155/mAP50=0.6032 | Congelado P=0.7548/R=0.6796/F1=0.7152/mAP50=0.6019 | Treinado layer3/4 P=0.7838/R=0.6694/F1=0.7221/mAP50=0.6002 | Treinado todas camadas P=0.7716/R=0.6676/F1=0.7158/mAP50=0.5982.
-4. Custo real (FewShot-R18-bola (treinado layer3/4)): removeu 127/742 FPs (17.1%; sendo 110 FPs distantes `IoU<0.10`) e removeu 39/2268 bolas verdadeiras por engano (ΔRecall=-0.0117).
-5. Bootstrap pareado (2000 reamostragens) para `trained_ball_layer34` vs Base: jogos (n=793) ΔF1=+0.0066 IC 95% [+0.0011, +0.0124] (melhora); imagens (n=3247) IC 95% [+0.0029, +0.0103]; média das 5 dobras=+0.0056±0.0074; supera também o controle congelado (ΔF1=+0.0068, IC jogos [+0.0011, +0.0130]).
-6. Separabilidade OOF bola vs FP (ROC-AUC): `conf` do detector YOLO=0.7395; jogadores congelado média/dobra=0.5159; bola treinado layer3/4 média/dobra=0.6598 (melhor config fixa OOF=0.7131 em `ctx3`); todas camadas média/dobra=0.6296 (colapsou no treino).
-7. Rótulo ruidoso (`results/amostra_fp.png`, 40 FPs em conf>=0.50): 9/40 (22.5%, IC Wilson [12.3%, 37.5%]) são bolas extras não anotadas (+2 duvidosos) e 22/40 (55,0%) são quase-acertos/duplicados da bola anotada; descontando bolas não anotadas, ΔF1 estimado=-0.0019. `soccernet_gsr_test_virgin` descartado como prova (caixas GT deslocadas).
-8. Viés e teto de ganho: `val.txt` não é teste virgem do detector (usado na escolha do checkpoint; comparação relativa justa, absolutos possivelmente otimistas); FP/img `train`=0.0554 vs `val`=0.2285; headroom base em `val`=+0.2465 em precisão e +0.0948 em F1; configurações testadas: Rodada 1=12, Rodada 2=36 fixas + 3 seletores CV aninhados.
+1. Veredito (Rodada 1 → 2 → 3): R1 (ctx 1×, 50/50) ΔF1=-0.0220; R2 (ctx 2×, global, CV 5 dobras) ΔF1=+0.0066; R3 (por jogo + fusão + recall alto): melhor método FewShot `conf_0.15/trained_per_game_logistic_plus_top1` atingiu F1=0.7381 (+0.0226 sobre o detector padrão conf=0.35 F1=0.7155), contra melhor baseline barato `conf_0.15/top1_per_frame` F1=0.7407 (+0.0252).
+2. Auto-referências por jogo (sem GT, conf>=0.6): cobertura=24/793 jogos (3.0% dos jogos, 2181/3247 imagens = 67.2%; 23 jogos reais sem `v14`); 144 quadros de referência excluídos da avaliação; precisão real das auto-referências=87.5% (IoU>=0.50) e 95.1% (IoU>=0.30).
+3. Em conf=0.35 (padrão do site, todo val.txt): Base F1=0.7155 | top1_per_frame F1=0.7312 | fusão logística por jogo F1=0.7198 | fusão logística + top1 F1=0.7287 (ΔF1=+0.0132, IC jogos [-0.0015, +0.0200]).
+4. Ponto de recall alto (conf=0.15 e 0.10): Baixar conf para 0.15 (R base=0.7757, F1=0.6328) + `trained_per_game_logistic_plus_top1` chegou a F1=0.7381 (R=0.6685, P=0.8238); em conf=0.10 (R base=0.8183, F1=0.5627) chegou a F1=0.7372.
+5. Melhor resultado no subconjunto elegível (`conf_0.15/trained_per_game_logistic_plus_top1`): F1=0.7746 vs base `conf_0.15`=0.6639 (ΔF1=+0.1107, IC jogos [+0.0718, +0.1200], FPs rem=1003, TPs rem=183); em `all_val` `conf_0.15/trained_per_game_logistic_plus_top1`: IC jogos [+0.0771, +0.1173], IC imgs [+0.0939, +0.1170].
+6. Modos por jogo (conf=0.35, elegível, corte seco): pos_only: ΔF1=+0.0035 (AUC=0.6712); pos−neg_jogo: ΔF1=+0.0022 (AUC=0.6832); pos−neg_global: ΔF1=+0.0033 (AUC=0.6913); controle congelado por jogo ΔF1=-0.0000, fusão logística elegível ΔF1=+0.0025.
+7. Custo real em `conf_0.15/trained_per_game_logistic_plus_top1` (todo val.txt): P=0.8238, R=0.6685, mAP50=0.6056 (vs base 0.35 mAP50=0.6032); removeu 1775/2251 FPs e perdeu 357/2583 TPs relativamente à base `conf_0.15`.
+8. Viés e auditorias: `val.txt` não é teste virgem do detector (`train∩val=0` jogos); em `results/amostra_fp.png` (40 FPs conf>=0.50), 55,0% são quase-acertos/duplicados da bola anotada, 22.5% bolas extras não anotadas e 17,5% FPs não-bola; `soccernet_gsr` descartado (GT deslocado), `box2boxcam` indisponível; configs testadas: R1=12, R2=36+3, R3=120.
+
+## Rodada 3 — Few-shot por jogo (6 auto-referências sem GT), fusão com `conf`, recall alto e NMS/top-1
+
+Detector: `t1b_v5_etapa1_rodada1.pt` (`imgsz=1920`, `IoU=0.5`) | Pontos operacionais testados: `conf ∈ [0.35, 0.15, 0.1]` | Contexto quadrado `96x96` com `context_scale ∈ [2.0, 3.0]` | Treino episódico POR JOGO (`layer3/4`, `16` épocas × `360` episódios = `5760`, cap `80` imgs/jogo cobrindo os 488 jogos de `train.txt`) | CV aninhada de `5` dobras por jogo sobre `val.txt` (tudo congelado na calibração antes de avaliar cada dobra; aviso: `val.txt` não é teste virgem do detector).
+
+### Cobertura e precisão real das 6 auto-referências por jogo (sem uso de GT)
+
+- Regra de seleção: até `6` detecções do próprio jogo com `conf >= 0.6`, 1 por quadro e espalhadas em `6` faixas uniformes dos quadros do jogo; os quadros escolhidos como referência são **excluídos** da avaliação de consulta.
+- Cobertura de jogos: **`24 / 793` jogos** (3.0% dos jogos), correspondendo a **`2181 / 3247` imagens** (67.2% do `val.txt`). Os demais `769` jogos têm poucos quadros (735 jogos têm apenas 1 imagem).
+- Quadros de referência excluídos: `144` (`6 × 24`). Quadros de consulta avaliados no subconjunto elegível (A): `2037` imagens (`932` imagens em `23` jogos reais excluindo `v14`).
+- **Precisão real das `144` auto-referências contra o GT**: **`126/144` (87.50%) em IoU>=0.50** e **`137/144` (95.14%) em IoU>=0.30**.
+- Negativos de baixa confiança (`0.05..0.2`) coletados nos mesmos quadros de referência (sem tocar quadros de consulta): `62` recortes (taxa limpa `IoU<0.10` contra GT: `95.2%`).
+
+### Ponto operacional `conf = 0.35`
+
+Separabilidade da `conf` do YOLO neste corte: ROC-AUC `all_val`=`0.7395`, elegível=`0.7427`.
+
+#### (B) Todo o `val.txt` operacional (3.247 imagens, 793 jogos)
+
+| Método | Tipo | Precisão | Recall | F1 | mAP50 | FPs rem | TPs rem | ΔF1 vs base deste conf (IC 95% jogos) | ΔF1 vs base 0.35 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Detector sozinho (`conf=0.35`, `iou=0.70`) | baseline | 0.7535 | 0.6811 | 0.7155 | 0.6032 | 0/742 | 0/2268 | 0.0000 | +0.0000 |
+| `nms_050` | barato (sem rede) | 0.7665 | 0.6811 | 0.7213 | 0.6060 | 51/742 | 0/2268 | +0.0058 [+0.0034, +0.0100] (melhora) | +0.0058 |
+| `nms_040` | barato (sem rede) | 0.7670 | 0.6811 | 0.7215 | 0.6060 | 53/742 | 0/2268 | +0.0060 [+0.0036, +0.0105] (melhora) | +0.0060 |
+| `top1_per_frame` | barato (sem rede) | 0.8182 | 0.6610 | 0.7312 | 0.5987 | 253/742 | 67/2268 | +0.0158 [+0.0085, +0.0210] (melhora) | +0.0158 |
+| `yolo_conf_cv` | barato (sem rede) | 0.7717 | 0.6721 | 0.7185 | 0.5964 | 80/742 | 30/2268 | +0.0030 [-0.0025, +0.0060] (indistinguível) | +0.0030 |
+| `frozen_per_game_cut` | cut_only / keep_detector | 0.7592 | 0.6760 | 0.7152 | 0.6006 | 28/742 | 17/2268 | -0.0003 [-0.0045, +0.0027] (indistinguível) | -0.0003 |
+| `trained_per_game_cut_keep_fallback` | cut_only / keep_detector | 0.7663 | 0.6745 | 0.7175 | 0.6009 | 57/742 | 22/2268 | +0.0020 [-0.0018, +0.0045] (indistinguível) | +0.0020 |
+| `trained_per_game_cut_global_fallback` | cut_only / global_train_prototype | 0.7848 | 0.6646 | 0.7197 | 0.5945 | 135/742 | 55/2268 | +0.0042 [-0.0041, +0.0099] (indistinguível) | +0.0042 |
+| `trained_per_game_doubt_zone` | doubt_zone / global_train_prototype | 0.7818 | 0.6673 | 0.7200 | 0.5933 | 122/742 | 46/2268 | +0.0046 [-0.0030, +0.0094] (indistinguível) | +0.0046 |
+| `trained_per_game_logistic_fusion` | logistic_fusion / global_train_prototype | 0.7888 | 0.6619 | 0.7198 | 0.5912 | 152/742 | 64/2268 | +0.0043 [-0.0041, +0.0092] (indistinguível) | +0.0043 |
+| `trained_per_game_logistic_plus_top1` | logistic_fusion / global_train_prototype + top1 | 0.8377 | 0.6447 | 0.7287 | 0.5872 | 326/742 | 121/2268 | +0.0132 [-0.0015, +0.0200] (indistinguível) | +0.0132 |
+
+#### (A) Subconjunto elegível de jogos com 6 auto-referências (24 jogos, 2037 quadros de consulta; quadros de referência excluídos)
+
+| Método | AUC média/dobra | Precisão | Recall | F1 | mAP50 | FPs rem | TPs rem | ΔF1 elegível (IC 95% jogos) | ΔF1 sem `v14` (23 jogos) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Detector sozinho (`conf=0.35`) | 0.7427 (`conf`) | 0.7736 | 0.7375 | 0.7551 | 0.6652 | 0/439 | 0/1500 | 0.0000 | 0.0000 (base=0.6126) |
+| `nms_050` | - | 0.7788 | 0.7375 | 0.7576 | 0.6668 | 13/439 | 0/1500 | +0.0025 [+0.0014, +0.0053] | - |
+| `nms_040` | - | 0.7788 | 0.7375 | 0.7576 | 0.6668 | 13/439 | 0/1500 | +0.0025 [+0.0014, +0.0053] | - |
+| `top1_per_frame` | - | 0.8282 | 0.7183 | 0.7694 | 0.6602 | 136/439 | 39/1500 | +0.0143 [+0.0047, +0.0185] | - |
+| `yolo_conf_cv` | - | 0.7847 | 0.7291 | 0.7559 | 0.6587 | 32/439 | 17/1500 | +0.0008 [-0.0119, +0.0039] | - |
+| `frozen_per_game_cut` | 0.6268 | 0.7830 | 0.7291 | 0.7551 | 0.6611 | 28/439 | 17/1500 | -0.0000 [-0.0119, +0.0049] | -0.0041 [-0.0142, +0.0070] |
+| `trained_per_game_cut_keep_fallback` | 0.6873 | 0.7946 | 0.7266 | 0.7591 | 0.6615 | 57/439 | 22/1500 | +0.0040 [-0.0036, +0.0104] | +0.0032 [-0.0077, +0.0126] |
+| `trained_per_game_cut_global_fallback` | 0.6690 | 0.7935 | 0.7291 | 0.7599 | 0.6632 | 53/439 | 17/1500 | +0.0048 [-0.0024, +0.0142] | +0.0056 [-0.0067, +0.0169] |
+| `trained_per_game_doubt_zone` | 0.6830 | 0.7911 | 0.7262 | 0.7572 | 0.6568 | 49/439 | 23/1500 | +0.0021 [-0.0118, +0.0071] | -0.0027 [-0.0157, +0.0098] |
+| `trained_per_game_logistic_fusion` | 0.7271 | 0.7966 | 0.7222 | 0.7576 | 0.6564 | 64/439 | 31/1500 | +0.0025 [-0.0125, +0.0069] | -0.0040 [-0.0168, +0.0080] |
+| `trained_per_game_logistic_plus_top1` | 0.7271 | 0.8430 | 0.7050 | 0.7679 | 0.6515 | 172/439 | 66/1500 | +0.0128 [-0.0104, +0.0194] | -0.0006 [-0.0160, +0.0134] |
+
+Comparação de modos de protótipo por jogo (corte seco no subconjunto elegível):
+
+- `positive_only`: AUC média/dobra=`0.6712`, F1=`0.7586` (ΔF1=`+0.0035`, IC 95% jogos `[-0.0098, +0.0099]`, FPs rem=64/439, TPs rem=28/1500).
+- `pos_minus_neg_same_game`: AUC média/dobra=`0.6832`, F1=`0.7573` (ΔF1=`+0.0022`, IC 95% jogos `[-0.0113, +0.0082]`, FPs rem=46/439, TPs rem=21/1500).
+- `pos_minus_neg_global`: AUC média/dobra=`0.6913`, F1=`0.7584` (ΔF1=`+0.0033`, IC 95% jogos `[-0.0063, +0.0106]`, FPs rem=55/439, TPs rem=23/1500).
+
+### Ponto operacional `conf = 0.15`
+
+Separabilidade da `conf` do YOLO neste corte: ROC-AUC `all_val`=`0.8531`, elegível=`0.8651`.
+
+#### (B) Todo o `val.txt` operacional (3.247 imagens, 793 jogos)
+
+| Método | Tipo | Precisão | Recall | F1 | mAP50 | FPs rem | TPs rem | ΔF1 vs base deste conf (IC 95% jogos) | ΔF1 vs base 0.35 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Detector sozinho (`conf=0.15`, `iou=0.70`) | baseline | 0.5343 | 0.7757 | 0.6328 | 0.6654 | 0/2251 | 0/2583 | 0.0000 | -0.0827 |
+| `nms_050` | barato (sem rede) | 0.6396 | 0.7535 | 0.6919 | 0.6579 | 837/2251 | 74/2583 | +0.0591 [+0.0465, +0.0674] (melhora) | -0.0236 |
+| `nms_040` | barato (sem rede) | 0.6431 | 0.7532 | 0.6938 | 0.6578 | 859/2251 | 75/2583 | +0.0610 [+0.0488, +0.0690] (melhora) | -0.0217 |
+| `top1_per_frame` | barato (sem rede) | 0.7739 | 0.7102 | 0.7407 | 0.6382 | 1560/2251 | 218/2583 | +0.1079 [+0.0916, +0.1182] (melhora) | +0.0252 |
+| `yolo_conf_cv` | barato (sem rede) | 0.7548 | 0.6739 | 0.7120 | 0.5977 | 1522/2251 | 339/2583 | +0.0793 [+0.0532, +0.0893] (melhora) | -0.0034 |
+| `frozen_per_game_cut` | cut_only / keep_detector | 0.5615 | 0.7498 | 0.6421 | 0.6496 | 301/2251 | 86/2583 | +0.0094 [+0.0004, +0.0134] (melhora) | -0.0733 |
+| `trained_per_game_cut_keep_fallback` | cut_only / keep_detector | 0.5774 | 0.7282 | 0.6441 | 0.6324 | 476/2251 | 158/2583 | +0.0113 [+0.0016, +0.0261] (melhora) | -0.0714 |
+| `trained_per_game_cut_global_fallback` | cut_only / global_train_prototype | 0.6172 | 0.7039 | 0.6577 | 0.6173 | 797/2251 | 239/2583 | +0.0249 [+0.0112, +0.0430] (melhora) | -0.0578 |
+| `trained_per_game_doubt_zone` | doubt_zone / global_train_prototype | 0.7333 | 0.6820 | 0.7067 | 0.6040 | 1425/2251 | 312/2583 | +0.0739 [+0.0390, +0.0914] (melhora) | -0.0088 |
+| `trained_per_game_logistic_fusion` | logistic_fusion / global_train_prototype | 0.7496 | 0.6913 | 0.7193 | 0.6122 | 1482/2251 | 281/2583 | +0.0865 [+0.0667, +0.0950] (melhora) | +0.0038 |
+| `trained_per_game_logistic_plus_top1` | logistic_fusion / global_train_prototype + top1 | 0.8238 | 0.6685 | 0.7381 | 0.6056 | 1775/2251 | 357/2583 | +0.1053 [+0.0771, +0.1173] (melhora) | +0.0226 |
+
+#### (A) Subconjunto elegível de jogos com 6 auto-referências (24 jogos, 2037 quadros de consulta; quadros de referência excluídos)
+
+| Método | AUC média/dobra | Precisão | Recall | F1 | mAP50 | FPs rem | TPs rem | ΔF1 elegível (IC 95% jogos) | ΔF1 sem `v14` (23 jogos) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Detector sozinho (`conf=0.15`) | 0.8651 (`conf`) | 0.5602 | 0.8147 | 0.6639 | 0.7177 | 0/1301 | 0/1657 | 0.0000 | 0.0000 (base=0.5446) |
+| `nms_050` | - | 0.6764 | 0.7881 | 0.7280 | 0.7045 | 534/1301 | 54/1657 | +0.0641 [+0.0425, +0.0727] | - |
+| `nms_040` | - | 0.6800 | 0.7876 | 0.7298 | 0.7042 | 547/1301 | 55/1657 | +0.0660 [+0.0450, +0.0743] | - |
+| `top1_per_frame` | - | 0.7855 | 0.7542 | 0.7695 | 0.6894 | 882/1301 | 123/1657 | +0.1056 [+0.0789, +0.1147] | - |
+| `yolo_conf_cv` | - | 0.7685 | 0.7311 | 0.7493 | 0.6602 | 853/1301 | 170/1657 | +0.0854 [+0.0455, +0.0943] | - |
+| `frozen_per_game_cut` | 0.6720 | 0.6110 | 0.7724 | 0.6823 | 0.6911 | 301/1301 | 86/1657 | +0.0184 [-0.0011, +0.0255] | +0.0104 [-0.0055, +0.0269] |
+| `trained_per_game_cut_keep_fallback` | 0.7487 | 0.6450 | 0.7370 | 0.6879 | 0.6623 | 476/1301 | 158/1657 | +0.0241 [+0.0059, +0.0598] | +0.0447 [+0.0243, +0.0660] |
+| `trained_per_game_cut_global_fallback` | 0.7143 | 0.6309 | 0.7453 | 0.6833 | 0.6677 | 414/1301 | 141/1657 | +0.0195 [+0.0043, +0.0527] | +0.0360 [+0.0129, +0.0586] |
+| `trained_per_game_doubt_zone` | 0.6498 | 0.7518 | 0.7384 | 0.7450 | 0.6661 | 805/1301 | 155/1657 | +0.0812 [+0.0234, +0.0977] | +0.0416 [+0.0176, +0.0640] |
+| `trained_per_game_logistic_fusion` | 0.8565 | 0.7645 | 0.7468 | 0.7555 | 0.6738 | 833/1301 | 138/1657 | +0.0917 [+0.0664, +0.0997] | +0.0823 [+0.0602, +0.1020] |
+| `trained_per_game_logistic_plus_top1` | 0.8565 | 0.8318 | 0.7247 | 0.7746 | 0.6663 | 1003/1301 | 183/1657 | +0.1107 [+0.0718, +0.1200] | +0.0903 [+0.0654, +0.1140] |
+
+Comparação de modos de protótipo por jogo (corte seco no subconjunto elegível):
+
+- `positive_only`: AUC média/dobra=`0.7189`, F1=`0.6853` (ΔF1=`+0.0214`, IC 95% jogos `[+0.0062, +0.0485]`, FPs rem=488/1301, TPs rem=173/1657).
+- `pos_minus_neg_same_game`: AUC média/dobra=`0.7450`, F1=`0.6932` (ΔF1=`+0.0293`, IC 95% jogos `[+0.0110, +0.0661]`, FPs rem=462/1301, TPs rem=133/1657).
+- `pos_minus_neg_global`: AUC média/dobra=`0.7501`, F1=`0.6885` (ΔF1=`+0.0247`, IC 95% jogos `[+0.0070, +0.0627]`, FPs rem=478/1301, TPs rem=157/1657).
+
+### Ponto operacional `conf = 0.10`
+
+Separabilidade da `conf` do YOLO neste corte: ROC-AUC `all_val`=`0.8734`, elegível=`0.8763`.
+
+#### (B) Todo o `val.txt` operacional (3.247 imagens, 793 jogos)
+
+| Método | Tipo | Precisão | Recall | F1 | mAP50 | FPs rem | TPs rem | ΔF1 vs base deste conf (IC 95% jogos) | ΔF1 vs base 0.35 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Detector sozinho (`conf=0.10`, `iou=0.70`) | baseline | 0.4287 | 0.8183 | 0.5627 | 0.6863 | 0/3631 | 0/2725 | 0.0000 | -0.1528 |
+| `nms_050` | barato (sem rede) | 0.5587 | 0.7727 | 0.6485 | 0.6696 | 1599/3631 | 152/2725 | +0.0859 [+0.0649, +0.1023] (melhora) | -0.0669 |
+| `nms_040` | barato (sem rede) | 0.5708 | 0.7697 | 0.6555 | 0.6679 | 1704/3631 | 162/2725 | +0.0928 [+0.0710, +0.1100] (melhora) | -0.0600 |
+| `top1_per_frame` | barato (sem rede) | 0.7632 | 0.7171 | 0.7394 | 0.6435 | 2890/3631 | 337/2725 | +0.1768 [+0.1558, +0.1903] (melhora) | +0.0240 |
+| `yolo_conf_cv` | barato (sem rede) | 0.7451 | 0.6742 | 0.7079 | 0.5980 | 2863/3631 | 480/2725 | +0.1452 [+0.1124, +0.1580] (melhora) | -0.0076 |
+| `frozen_per_game_cut` | cut_only / keep_detector | 0.4585 | 0.7856 | 0.5791 | 0.6683 | 542/3631 | 109/2725 | +0.0164 [+0.0084, +0.0220] (melhora) | -0.1364 |
+| `trained_per_game_cut_keep_fallback` | cut_only / keep_detector | 0.4802 | 0.7583 | 0.5880 | 0.6480 | 898/3631 | 200/2725 | +0.0254 [+0.0148, +0.0389] (melhora) | -0.1274 |
+| `trained_per_game_cut_global_fallback` | cut_only / global_train_prototype | 0.5466 | 0.6946 | 0.6117 | 0.6059 | 1712/3631 | 412/2725 | +0.0491 [+0.0334, +0.0659] (melhora) | -0.1037 |
+| `trained_per_game_doubt_zone` | doubt_zone / global_train_prototype | 0.7584 | 0.6465 | 0.6980 | 0.5763 | 2945/3631 | 572/2725 | +0.1353 [+0.0819, +0.1588] (melhora) | -0.0175 |
+| `trained_per_game_logistic_fusion` | logistic_fusion / global_train_prototype | 0.7403 | 0.6901 | 0.7143 | 0.6109 | 2825/3631 | 427/2725 | +0.1517 [+0.1258, +0.1630] (melhora) | -0.0011 |
+| `trained_per_game_logistic_plus_top1` | logistic_fusion / global_train_prototype + top1 | 0.8236 | 0.6673 | 0.7372 | 0.6042 | 3155/3631 | 503/2725 | +0.1746 [+0.1428, +0.1883] (melhora) | +0.0218 |
+
+#### (A) Subconjunto elegível de jogos com 6 auto-referências (24 jogos, 2037 quadros de consulta; quadros de referência excluídos)
+
+| Método | AUC média/dobra | Precisão | Recall | F1 | mAP50 | FPs rem | TPs rem | ΔF1 elegível (IC 95% jogos) | ΔF1 sem `v14` (23 jogos) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Detector sozinho (`conf=0.10`) | 0.8763 (`conf`) | 0.4595 | 0.8623 | 0.5996 | 0.7423 | 0/2063 | 0/1754 | 0.0000 | 0.0000 (base=0.4898) |
+| `nms_050` | - | 0.6058 | 0.8053 | 0.6914 | 0.7156 | 997/2063 | 116/1754 | +0.0919 [+0.0512, +0.1114] | - |
+| `nms_040` | - | 0.6194 | 0.8019 | 0.6990 | 0.7135 | 1061/2063 | 123/1754 | +0.0994 [+0.0565, +0.1197] | - |
+| `top1_per_frame` | - | 0.7788 | 0.7616 | 0.7701 | 0.6952 | 1623/2063 | 205/1754 | +0.1705 [+0.1327, +0.1829] | - |
+| `yolo_conf_cv` | - | 0.7685 | 0.7311 | 0.7493 | 0.6602 | 1615/2063 | 267/1754 | +0.1498 [+0.0982, +0.1595] | - |
+| `frozen_per_game_cut` | 0.6781 | 0.5196 | 0.8088 | 0.6327 | 0.7122 | 542/2063 | 109/1754 | +0.0331 [+0.0212, +0.0489] | +0.0362 [+0.0208, +0.0532] |
+| `trained_per_game_cut_keep_fallback` | 0.7523 | 0.5715 | 0.7640 | 0.6539 | 0.6783 | 898/2063 | 200/1754 | +0.0543 [+0.0284, +0.1001] | +0.0840 [+0.0609, +0.1058] |
+| `trained_per_game_cut_global_fallback` | 0.7321 | 0.5555 | 0.7650 | 0.6436 | 0.6765 | 818/2063 | 198/1754 | +0.0441 [+0.0252, +0.0789] | +0.0608 [+0.0352, +0.0852] |
+| `trained_per_game_doubt_zone` | 0.6492 | 0.7798 | 0.7104 | 0.7435 | 0.6439 | 1655/2063 | 309/1754 | +0.1439 [+0.0506, +0.1651] | +0.0782 [+0.0431, +0.1143] |
+| `trained_per_game_logistic_fusion` | 0.8618 | 0.7628 | 0.7448 | 0.7537 | 0.6719 | 1592/2063 | 239/1754 | +0.1542 [+0.1142, +0.1627] | +0.1331 [+0.1091, +0.1567] |
+| `trained_per_game_logistic_plus_top1` | 0.8618 | 0.8310 | 0.7227 | 0.7731 | 0.6642 | 1764/2063 | 284/1754 | +0.1735 [+0.1222, +0.1851] | +0.1414 [+0.1158, +0.1675] |
+
+Comparação de modos de protótipo por jogo (corte seco no subconjunto elegível):
+
+- `positive_only`: AUC média/dobra=`0.7476`, F1=`0.6547` (ΔF1=`+0.0552`, IC 95% jogos `[+0.0301, +0.1008]`, FPs rem=906/2063, TPs rem=201/1754).
+- `pos_minus_neg_same_game`: AUC média/dobra=`0.7564`, F1=`0.6514` (ΔF1=`+0.0519`, IC 95% jogos `[+0.0280, +0.0958]`, FPs rem=849/2063, TPs rem=185/1754).
+- `pos_minus_neg_global`: AUC média/dobra=`0.7606`, F1=`0.6528` (ΔF1=`+0.0532`, IC 95% jogos `[+0.0283, +0.0973]`, FPs rem=892/2063, TPs rem=201/1754).
+
+### Treino episódico por jogo no `train.txt` (Rodada 3)
+
+Mineração balanceada por jogo (`cap=80` imgs/jogo cobrindo todos os 488 jogos de `train.txt`: `13538` imagens varridas a `imgsz=1280`, `conf>=0.05`). Episódios montados com suporte (6 bolas + 6 negativos) e consultas (8 bolas + 8 negativos) do **mesmo jogo**, com `layer3/4` treináveis, `BN` em `eval`, `AdamW(2e-4, wd=1e-4)`, `CosineAnnealingLR`, `cosine * 20`, `5760` episódios.
+
+| Contexto | Jogos elegíveis no treino | Recortes pos / neg mesmo jogo | % negativos do mesmo jogo nos episódios | Loss época 1 | Loss época final | Tempo (s) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2× | 338 | 13010 / 5627 | 74.4% | 0.6063 | 0.1006 | 358.5 |
+| 3× | 338 | 13010 / 5627 | 74.4% | 0.6130 | 0.1320 | 342.0 |
+
+---
 
 ## Rodada 2 — Validação cruzada aninhada (5 dobras por jogo, contexto 2×/3×/4×, treino completo)
 
@@ -144,7 +293,7 @@ Dos `393` FPs do detector em `conf >= 0.5` no `val.txt`, sorteamos uma amostra f
 - **Origem**: `/Users/j.henrique/soccer-four-ref-gsr25/archives/test.zip` (split `test` do SoccerNet Game State Reconstruction 2025, 49 clipes 1080p de transmissão).
 - **Montagem na Rodada 1**: `10 quadros igualmente espaçados por clipe em 49 clipes do split test do SoccerNet GSR 2025 (490 quadros, 456 anotações category_id=4 role=ball).`.
 - **Prova de 0 sobreposição com `r1`**: `0 correspondências de SHA-256 contra todas as 36.150 imagens listadas em r1/copy_receipt.json (e fora dos jogos de treino 4, 6, 9 do FewShot-R18).`.
-- **Confiabilidade das anotações de bola (auditoria visual)**: NÃO CONFIÁVEL — descartado como prova na Rodada 2. A auditoria visual de 20 caixas GT e 8 'FPs' do t1b_v5 no GSR mostrou que as anotações de bola do SoccerNet GSR (dataset voltado a jogadores/estado de jogo) ficam frequentemente deslocadas/atrasadas em bolas rápidas (inclusive caixas GT sobre grama vazia). Como consequência, 6–7 de 8 'FPs' inspecionados eram bolas reais detectadas corretamente pelo YOLO com IoU < 0,50 contra a caixa deslocada do GSR, corrompendo artificialmente precisão, F1 e AUC.
+- **Confiabilidade das anotações de bola (auditoria visual)**: NÃO CONFIÁVEL — descartado como prova nas Rodadas 2 e 3. A auditoria visual de 20 caixas GT e 8 'FPs' do t1b_v5 no GSR mostrou que as anotações de bola do SoccerNet GSR (dataset voltado a jogadores/estado de jogo) ficam frequentemente deslocadas/atrasadas em bolas rápidas (inclusive caixas GT sobre grama vazia). Como consequência, 6–7 de 8 'FPs' inspecionados eram bolas reais detectadas corretamente pelo YOLO com IoU < 0,50 contra a caixa deslocada do GSR, corrompendo artificialmente precisão, F1 e AUC.
 - **`box2boxcam` (câmera amadora/noturna, 198 quadros)**: não disponível localmente; permanece não medido.
 
 ## Rodada 1 (preservada como referência histórica)
