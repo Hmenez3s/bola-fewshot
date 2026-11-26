@@ -484,6 +484,49 @@ def partition_split(
     return first, second
 
 
+def make_group_kfold(
+    split: DatasetSplit,
+    n_folds: int = 5,
+    seed: int = 42,
+    group_by: Mapping[str, str] | None = None,
+) -> list[DatasetSplit]:
+    if n_folds < 2:
+        raise ValueError("n_folds must be >= 2")
+    ordered = sorted(split.records, key=lambda r: r.image_id)
+    grouped: dict[str, list[ImageRecord]] = defaultdict(list)
+    for record in ordered:
+        gid = group_by.get(record.image_id, record.image_id) if group_by is not None else record.image_id
+        grouped[gid].append(record)
+    group_ids = sorted(grouped.keys())
+    if len(group_ids) < n_folds:
+        raise ValueError(f"need at least {n_folds} groups for {n_folds}-fold CV, got {len(group_ids)}")
+    rng = random.Random(seed)
+    rng.shuffle(group_ids)
+    rank = {gid: idx for idx, gid in enumerate(group_ids)}
+    ordered_groups = sorted(group_ids, key=lambda gid: (-len(grouped[gid]), rank[gid]))
+
+    fold_lists: list[list[ImageRecord]] = [[] for _ in range(n_folds)]
+    fold_counts = [0] * n_folds
+    for gid in ordered_groups:
+        target = min(range(n_folds), key=lambda f: (fold_counts[f], f))
+        members = grouped[gid]
+        fold_lists[target].extend(members)
+        fold_counts[target] += len(members)
+
+    folds = [
+        DatasetSplit(name=f"{split.name}_fold{i}", records=tuple(sorted(items, key=lambda r: r.image_id)))
+        for i, items in enumerate(fold_lists)
+    ]
+    for i in range(n_folds):
+        for j in range(i + 1, n_folds):
+            assert_disjoint_splits(folds[i], folds[j])
+            if group_by is not None:
+                overlap = audit_group_overlap(folds[i], folds[j], group_by)
+                if not overlap["disjoint_by_group"]:
+                    raise ValueError(f"group leakage between fold {i} and fold {j}")
+    return folds
+
+
 def stratified_sample_split(
     split: DatasetSplit,
     max_images: int,
