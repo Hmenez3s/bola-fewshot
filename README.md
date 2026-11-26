@@ -2,7 +2,7 @@
 
 Pesquisa: o FewShot-R18 remove falsos positivos de um detector de bola e melhora o detector sozinho?
 
-Pergunta: dado o detector de bola `t1b_v5_etapa1_rodada1.pt` (`Evolvera/footlabs`, release `pesos-bola-20261125`), um filtro few-shot baseado no FewShot-R18 sobre os crops detectados melhora precisão/F1/mAP em relação ao detector sozinho, sem derrubar o recall?
+Pergunta: dado um detector de bola Ultralytics YOLO de 1 classe (`t1b_v5_etapa1_rodada1.pt`, pesos proprietários não distribuídos neste repositório), um filtro few-shot baseado no FewShot-R18 sobre os crops detectados melhora precisão/F1/mAP em relação ao detector sozinho, sem derrubar o recall?
 
 O filtro atua exclusivamente em pós-detecção: avalia cada caixa proposta pelo detector e remove os candidatos abaixo do limiar congelado. Ele não detecta bolas novas e não recupera bolas perdidas.
 
@@ -24,15 +24,15 @@ Mesmas imagens, mesmo detector (`t1b_v5_etapa1_rodada1.pt`), mesma resolução (
 
 ## Configuração do detector
 
-Parâmetros alinhados a `Evolvera/footlabs` (`server/engine/ball_detector.py`, `server/engine/cerco_beta/detector.py` e `server/engine/pipeline.py`):
+Parâmetros de inferência do detector de bola:
 
 - Classe única: `0` (`ball`).
-- Leitura padrão do site para modelos T1b: `imgsz=1920`, `conf=0.35`, `iou=0.70`.
+- Leitura padrão avaliada: `imgsz=1920`, `conf=0.35`, `iou=0.70`.
 - O checkpoint `t1b_v5_etapa1_rodada1.pt` foi treinado com `train_args.imgsz=1280` (`--imgsz` configurável).
 
 ## Instalação e insumos
 
-Pesos e datasets ficam fora do git (`.gitignore`).
+Pesos proprietários do detector e datasets ficam fora do git (`.gitignore`) e não são distribuídos neste repositório.
 
 ```bash
 python3.12 -m venv .venv
@@ -40,32 +40,21 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Baixar os pesos do detector (repo privado `Evolvera/footlabs`):
-
-```bash
-mkdir -p models
-gh release download pesos-bola-20261125 -R Evolvera/footlabs -p t1b_v5_etapa1_rodada1.pt -D models
-```
-
-Opcional (segunda comparação com o modelo padrão do site):
-
-```bash
-gh release download pesos-bola-20261125 -R Evolvera/footlabs -p t1b_v4_etapa2_best.pt -D models
-```
+Coloque o checkpoint do seu detector de bola YOLO (1 classe: `ball`) em `models/t1b_v5_etapa1_rodada1.pt` (ou passe outro caminho em `--detector-weights`).
 
 Obter o checkpoint de controle `six-references.pth` de `Hmenez3s/few-shot-team-goalkeeper-assignment` (ou apontar para a cópia local).
 
 ## Execução (um comando do detector ao relatório)
 
-Com os dados copiados localmente em `/Users/j.henrique/bola-fewshot-data` (remapeando o prefixo Windows sem alterar os arquivos originais):
+Com os dados copiados localmente em `/caminho/para/dados` (remapeando eventual prefixo Windows sem alterar os arquivos originais):
 
 ```bash
 .venv/bin/python run_experiment.py \
-  --data-yaml /Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r5_9010/data.yaml \
-  --remap-prefix C:/Footlabs_Miguel_cache=/Users/j.henrique/bola-fewshot-data \
+  --data-yaml /caminho/para/dados/item488_t1b_v5_dataset_r5_9010/data.yaml \
+  --remap-prefix C:/dataset_cache=/caminho/para/dados \
   --detector-weights models/t1b_v5_etapa1_rodada1.pt \
-  --fewshot-weights /Users/j.henrique/four-reference-team-classifier/models/six-references.pth \
-  --imagenet-weights /Users/j.henrique/four-reference-team-classifier/data/inputs/resnet18.pth \
+  --fewshot-weights /caminho/para/few-shot-team-goalkeeper-assignment/models/six-references.pth \
+  --imagenet-weights /caminho/para/resnet18.pth \
   --train-ball-arm \
   --imgsz 1920 \
   --conf 0.35 \
@@ -89,12 +78,12 @@ Opções adicionais úteis:
 
 ```bash
 .venv/bin/python run_round2.py \
-  --data-yaml /Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r5_9010/data.yaml \
-  --remap-prefix C:/Footlabs_Miguel_cache=/Users/j.henrique/bola-fewshot-data \
+  --data-yaml /caminho/para/dados/item488_t1b_v5_dataset_r5_9010/data.yaml \
+  --remap-prefix C:/dataset_cache=/caminho/para/dados \
   --group-map-json .tmp/r5_9010_group_map.json \
   --detector-weights models/t1b_v5_etapa1_rodada1.pt \
-  --fewshot-weights /Users/j.henrique/four-reference-team-classifier/models/six-references.pth \
-  --imagenet-weights /Users/j.henrique/four-reference-team-classifier/data/inputs/resnet18.pth \
+  --fewshot-weights /caminho/para/few-shot-team-goalkeeper-assignment/models/six-references.pth \
+  --imagenet-weights /caminho/para/resnet18.pth \
   --imgsz 1920 \
   --conf 0.35 \
   --context-scales 2 3 4 \
@@ -117,12 +106,12 @@ Opções adicionais úteis:
 
 ```bash
 .venv/bin/python run_round3.py \
-  --data-yaml /Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r5_9010/data.yaml \
-  --remap-prefix C:/Footlabs_Miguel_cache=/Users/j.henrique/bola-fewshot-data \
+  --data-yaml /caminho/para/dados/item488_t1b_v5_dataset_r5_9010/data.yaml \
+  --remap-prefix C:/dataset_cache=/caminho/para/dados \
   --group-map-json .tmp/r5_9010_group_map.json \
   --detector-weights models/t1b_v5_etapa1_rodada1.pt \
-  --fewshot-weights /Users/j.henrique/four-reference-team-classifier/models/six-references.pth \
-  --imagenet-weights /Users/j.henrique/four-reference-team-classifier/data/inputs/resnet18.pth \
+  --fewshot-weights /caminho/para/few-shot-team-goalkeeper-assignment/models/six-references.pth \
+  --imagenet-weights /caminho/para/resnet18.pth \
   --imgsz 1920 \
   --operating-confs 0.35 0.15 0.10 \
   --context-scales 2 3 \
