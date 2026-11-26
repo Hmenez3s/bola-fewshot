@@ -237,7 +237,7 @@ def render_three_rounds_report(
                 "",
                 f"#### (A) Subconjunto elegível de jogos com 6 auto-referências ({cov['eligible_games']} jogos, {cov['eligible_query_images']} quadros de consulta; quadros de referência excluídos)",
                 "",
-                "| Método | AUC média/dobra | Precisão | Recall | F1 | mAP50 | FPs rem | TPs rem | ΔF1 elegível (IC 95% jogos) | ΔF1 sem `v14` (32 jogos) |",
+                f"| Método | AUC média/dobra | Precisão | Recall | F1 | mAP50 | FPs rem | TPs rem | ΔF1 elegível (IC 95% jogos) | ΔF1 sem `v14` ({cov['eligible_no_v14_games']} jogos) |",
                 "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
             ]
         )

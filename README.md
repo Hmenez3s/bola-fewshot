@@ -113,6 +113,35 @@ Opções adicionais úteis:
   --output-dir results
 ```
 
+### Rodada 3 (few-shot por jogo com 6 auto-referências sem GT, recall alto `conf=0.15/0.10`, fusão com `conf` e baselines NMS/top-1)
+
+```bash
+.venv/bin/python run_round3.py \
+  --data-yaml /Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r5_9010/data.yaml \
+  --remap-prefix C:/Footlabs_Miguel_cache=/Users/j.henrique/bola-fewshot-data \
+  --group-map-json .tmp/r5_9010_group_map.json \
+  --detector-weights models/t1b_v5_etapa1_rodada1.pt \
+  --fewshot-weights /Users/j.henrique/four-reference-team-classifier/models/six-references.pth \
+  --imagenet-weights /Users/j.henrique/four-reference-team-classifier/data/inputs/resnet18.pth \
+  --imgsz 1920 \
+  --operating-confs 0.35 0.15 0.10 \
+  --context-scales 2 3 \
+  --canvas 96x96 \
+  --n-refs 6 \
+  --ref-min-conf 0.60 \
+  --n-folds 5 \
+  --seed 42 \
+  --train-seed 25 \
+  --train-epochs 16 \
+  --train-steps-per-epoch 360 \
+  --train-mining-imgsz 1280 \
+  --train-cap-per-game 80 \
+  --bootstrap-resamples 2000 \
+  --device mps \
+  --cache-dir .tmp/r3_cache \
+  --output-dir results
+```
+
 ## Testes
 
 ```bash
