@@ -1,0 +1,530 @@
+{
+  "total_fps_at_min_conf": 393,
+  "min_conf": 0.5,
+  "sample_size": 40,
+  "context_scale": 3.0,
+  "seed": 42,
+  "image_path": "results/amostra_fp.png",
+  "samples": [
+    {
+      "image_id": "val/d9e8bcde7dba17fbadff86c4879b5d2e1554deb5f1d97533c6bf1c13adbfdf30_12a610f7fa77aaba.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/d9e8bcde7dba17fbadff86c4879b5d2e1554deb5f1d97533c6bf1c13adbfdf30_12a610f7fa77aaba.jpg",
+      "box": [
+        386.13,
+        247.34,
+        399.73,
+        264.35
+      ],
+      "conf": 0.5374,
+      "n_gt_in_image": 1,
+      "sample_index": 1
+    },
+    {
+      "image_id": "val/bbc75324750dee971b051d33c940373310eb737340f8d63dd22343d3e3451744_6ce99c646bb9d9ff.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/bbc75324750dee971b051d33c940373310eb737340f8d63dd22343d3e3451744_6ce99c646bb9d9ff.jpg",
+      "box": [
+        69.95,
+        141.47,
+        75.69,
+        146.75
+      ],
+      "conf": 0.5941,
+      "n_gt_in_image": 1,
+      "sample_index": 2
+    },
+    {
+      "image_id": "val/e31ff70bfbbfb12882357bf612665c5800a2f671fec4cb51ee6fe7ec3814f73f_d0156a82c4cf5c2c.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/e31ff70bfbbfb12882357bf612665c5800a2f671fec4cb51ee6fe7ec3814f73f_d0156a82c4cf5c2c.jpg",
+      "box": [
+        525.8,
+        102.68,
+        531.72,
+        108.61
+      ],
+      "conf": 0.586,
+      "n_gt_in_image": 1,
+      "sample_index": 3
+    },
+    {
+      "image_id": "val/8159976c10bc36bcc3e68185893da4c7550840d2fe49fba8b95a3e4d6a0e5014_ec4d53211a0714f5.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/8159976c10bc36bcc3e68185893da4c7550840d2fe49fba8b95a3e4d6a0e5014_ec4d53211a0714f5.jpg",
+      "box": [
+        321.37,
+        376.52,
+        334.74,
+        389.64
+      ],
+      "conf": 0.6153,
+      "n_gt_in_image": 1,
+      "sample_index": 4
+    },
+    {
+      "image_id": "train/b0776110979c69f0b0f6bd0ab18da915738575be84e812ddceb46d4e4c4d8bcf_51d8540dc6de90ba.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/train/b0776110979c69f0b0f6bd0ab18da915738575be84e812ddceb46d4e4c4d8bcf_51d8540dc6de90ba.jpg",
+      "box": [
+        892.66,
+        80.39,
+        900.4,
+        87.98
+      ],
+      "conf": 0.5206,
+      "n_gt_in_image": 1,
+      "sample_index": 5
+    },
+    {
+      "image_id": "train/f6ae3012152d3b7d57a6115771d47850b04a6118d4350949c10d693b0aff3aa2_3797cff6b8c0c3ec.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/train/f6ae3012152d3b7d57a6115771d47850b04a6118d4350949c10d693b0aff3aa2_3797cff6b8c0c3ec.jpg",
+      "box": [
+        164.3,
+        213.85,
+        180.47,
+        230.87
+      ],
+      "conf": 0.5264,
+      "n_gt_in_image": 1,
+      "sample_index": 6
+    },
+    {
+      "image_id": "val/f842acd6f7a59efb51e7bce13e3eac7038b025d0c01e66eb86580505b635454a_7e5c8716221b9acb.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/f842acd6f7a59efb51e7bce13e3eac7038b025d0c01e66eb86580505b635454a_7e5c8716221b9acb.jpg",
+      "box": [
+        417.0,
+        513.29,
+        481.04,
+        576.0
+      ],
+      "conf": 0.6638,
+      "n_gt_in_image": 1,
+      "sample_index": 7
+    },
+    {
+      "image_id": "val/d7dca2e4742b34493397d9b33fed090b091c134528073f7de8da2721ba2bde4d_daf78744d63429aa.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/d7dca2e4742b34493397d9b33fed090b091c134528073f7de8da2721ba2bde4d_daf78744d63429aa.jpg",
+      "box": [
+        921.43,
+        18.74,
+        944.97,
+        43.98
+      ],
+      "conf": 0.5721,
+      "n_gt_in_image": 1,
+      "sample_index": 8
+    },
+    {
+      "image_id": "train/c9e63110548a7018c18be0489a4f3c33a2a0c5b6b23ff00ea6374facead34fde_d27b5de9a27fd811.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/train/c9e63110548a7018c18be0489a4f3c33a2a0c5b6b23ff00ea6374facead34fde_d27b5de9a27fd811.jpg",
+      "box": [
+        320.56,
+        164.94,
+        355.35,
+        195.5
+      ],
+      "conf": 0.596,
+      "n_gt_in_image": 1,
+      "sample_index": 9
+    },
+    {
+      "image_id": "val/8d832c514ef9734203ddfd31b74f50be5ef9b4230bbc38ad5a6a6ce69c6847a2_ee9958a86f5d5ca7.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/8d832c514ef9734203ddfd31b74f50be5ef9b4230bbc38ad5a6a6ce69c6847a2_ee9958a86f5d5ca7.jpg",
+      "box": [
+        547.65,
+        207.29,
+        610.03,
+        268.21
+      ],
+      "conf": 0.5626,
+      "n_gt_in_image": 1,
+      "sample_index": 10
+    },
+    {
+      "image_id": "train/b7e0cc9ff4bbb5812f74825095d093b3f9301b5823ac3ea608086632e126d912_7c0c31765dacfd99.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/train/b7e0cc9ff4bbb5812f74825095d093b3f9301b5823ac3ea608086632e126d912_7c0c31765dacfd99.jpg",
+      "box": [
+        636.46,
+        119.53,
+        644.8,
+        129.21
+      ],
+      "conf": 0.5969,
+      "n_gt_in_image": 1,
+      "sample_index": 11
+    },
+    {
+      "image_id": "val/2bf0e5fca1736196c2e96460ff24ea774b2782b5dd313495abb74a2cfe602f14_984a063a1540ce5b.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/2bf0e5fca1736196c2e96460ff24ea774b2782b5dd313495abb74a2cfe602f14_984a063a1540ce5b.jpg",
+      "box": [
+        558.42,
+        110.12,
+        563.7,
+        115.43
+      ],
+      "conf": 0.5839,
+      "n_gt_in_image": 1,
+      "sample_index": 12
+    },
+    {
+      "image_id": "val/58fd7b0da358e57685724c08867b0603b90b2d2e3b2fad8ffc6f331ec1a13d39_89046a3ae858ab81.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/58fd7b0da358e57685724c08867b0603b90b2d2e3b2fad8ffc6f331ec1a13d39_89046a3ae858ab81.jpg",
+      "box": [
+        449.81,
+        205.7,
+        461.04,
+        217.87
+      ],
+      "conf": 0.6351,
+      "n_gt_in_image": 1,
+      "sample_index": 13
+    },
+    {
+      "image_id": "val/85f5143a9505fa02f713a9221e1bfd863cd0cd5d2c1dad030d0ac6970b84e603_854fb4f57ec215a0.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/85f5143a9505fa02f713a9221e1bfd863cd0cd5d2c1dad030d0ac6970b84e603_854fb4f57ec215a0.jpg",
+      "box": [
+        309.25,
+        238.34,
+        317.05,
+        247.64
+      ],
+      "conf": 0.5349,
+      "n_gt_in_image": 1,
+      "sample_index": 14
+    },
+    {
+      "image_id": "train/a96a416fe9ae4d611b734849932d8d86b1465097c8b049579aa7bc0e0ffae50b_c3a9979929b22bd2.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/train/a96a416fe9ae4d611b734849932d8d86b1465097c8b049579aa7bc0e0ffae50b_c3a9979929b22bd2.jpg",
+      "box": [
+        357.35,
+        250.09,
+        365.87,
+        258.03
+      ],
+      "conf": 0.5124,
+      "n_gt_in_image": 1,
+      "sample_index": 15
+    },
+    {
+      "image_id": "train/54a85227c678fa19ff67f038fce6ba2d69b702c96ad981ba8a396640cc940138_1c4678124e3ec730.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/train/54a85227c678fa19ff67f038fce6ba2d69b702c96ad981ba8a396640cc940138_1c4678124e3ec730.jpg",
+      "box": [
+        353.56,
+        296.46,
+        364.48,
+        306.47
+      ],
+      "conf": 0.5138,
+      "n_gt_in_image": 1,
+      "sample_index": 16
+    },
+    {
+      "image_id": "val/7a2b9291d7f44612efda06595804bb50f010aa7dff7b92e030cadba69bd68d7a_246f0b4ff885b0e1.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/7a2b9291d7f44612efda06595804bb50f010aa7dff7b92e030cadba69bd68d7a_246f0b4ff885b0e1.jpg",
+      "box": [
+        274.63,
+        247.7,
+        336.56,
+        312.05
+      ],
+      "conf": 0.7191,
+      "n_gt_in_image": 1,
+      "sample_index": 17
+    },
+    {
+      "image_id": "val/d08924be704e18ff778ae2b4ee8b22c64c72fb2a9fdfa1804d21a70bca50f2e4_c3f5b614f7550a9b.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/d08924be704e18ff778ae2b4ee8b22c64c72fb2a9fdfa1804d21a70bca50f2e4_c3f5b614f7550a9b.jpg",
+      "box": [
+        190.06,
+        113.05,
+        196.19,
+        119.46
+      ],
+      "conf": 0.5504,
+      "n_gt_in_image": 1,
+      "sample_index": 18
+    },
+    {
+      "image_id": "val/a63311f06527a894d0c924c068aecf218f1f1759389512b2ec305dd0e65bf697_1d6ae6dfdd9f0347.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/a63311f06527a894d0c924c068aecf218f1f1759389512b2ec305dd0e65bf697_1d6ae6dfdd9f0347.jpg",
+      "box": [
+        788.93,
+        354.52,
+        799.38,
+        365.99
+      ],
+      "conf": 0.5834,
+      "n_gt_in_image": 1,
+      "sample_index": 19
+    },
+    {
+      "image_id": "val/80db99ca2656c2975ffde49bbcf9f6794d0151f166057d59bebca085b6bf7dbb_c52f1793c8905369.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/80db99ca2656c2975ffde49bbcf9f6794d0151f166057d59bebca085b6bf7dbb_c52f1793c8905369.jpg",
+      "box": [
+        410.3,
+        88.65,
+        419.69,
+        98.23
+      ],
+      "conf": 0.615,
+      "n_gt_in_image": 1,
+      "sample_index": 20
+    },
+    {
+      "image_id": "train/9683310fe3df4152c246514fb8957ceca58e09c437cee461bdf64c4e5c06305a_549e171eb016fc6d.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/train/9683310fe3df4152c246514fb8957ceca58e09c437cee461bdf64c4e5c06305a_549e171eb016fc6d.jpg",
+      "box": [
+        455.63,
+        235.47,
+        461.59,
+        242.23
+      ],
+      "conf": 0.5908,
+      "n_gt_in_image": 1,
+      "sample_index": 21
+    },
+    {
+      "image_id": "val/120719157cf43a819cf61c1c7c6adcdf9b272b6f868bf42515471e18faaa8c2d_1677a67d710b4ad8.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/120719157cf43a819cf61c1c7c6adcdf9b272b6f868bf42515471e18faaa8c2d_1677a67d710b4ad8.jpg",
+      "box": [
+        463.98,
+        259.57,
+        497.35,
+        289.94
+      ],
+      "conf": 0.6482,
+      "n_gt_in_image": 1,
+      "sample_index": 22
+    },
+    {
+      "image_id": "val/75765e2737fee4b709d9771e1d8a086c46843cd794493c498c92f702d8aaa072_bf86c80c30ff1ea9.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/75765e2737fee4b709d9771e1d8a086c46843cd794493c498c92f702d8aaa072_bf86c80c30ff1ea9.jpg",
+      "box": [
+        45.83,
+        125.04,
+        51.54,
+        130.54
+      ],
+      "conf": 0.5812,
+      "n_gt_in_image": 1,
+      "sample_index": 23
+    },
+    {
+      "image_id": "val/be39bd6950f28a1a28d97b8851c6db4c4a7fd0cdebe87bae5b06ee5be117cfb0_a0a403f2032fbbc1.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/be39bd6950f28a1a28d97b8851c6db4c4a7fd0cdebe87bae5b06ee5be117cfb0_a0a403f2032fbbc1.jpg",
+      "box": [
+        44.96,
+        125.06,
+        50.74,
+        130.49
+      ],
+      "conf": 0.5611,
+      "n_gt_in_image": 1,
+      "sample_index": 24
+    },
+    {
+      "image_id": "train/9adaba3152313210301e6ed86d530ffcfd223f3892885c7dbc7be70568883d6c_1a1ffbab11e317e8.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/train/9adaba3152313210301e6ed86d530ffcfd223f3892885c7dbc7be70568883d6c_1a1ffbab11e317e8.jpg",
+      "box": [
+        755.27,
+        135.57,
+        762.81,
+        144.34
+      ],
+      "conf": 0.5605,
+      "n_gt_in_image": 1,
+      "sample_index": 25
+    },
+    {
+      "image_id": "val/16326c8a3037a4fc349436c9077c27bfd4309b3f1b1806c6a38bbb96d13d8961_cd22ed8bc31a8ead.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/16326c8a3037a4fc349436c9077c27bfd4309b3f1b1806c6a38bbb96d13d8961_cd22ed8bc31a8ead.jpg",
+      "box": [
+        558.43,
+        110.06,
+        563.82,
+        115.42
+      ],
+      "conf": 0.5777,
+      "n_gt_in_image": 1,
+      "sample_index": 26
+    },
+    {
+      "image_id": "val/12be56172c9dc90355bab9389c9a810eb9e059759673da1eb2cdbd75a268ff55_9b5ff9fad9003e8a.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/12be56172c9dc90355bab9389c9a810eb9e059759673da1eb2cdbd75a268ff55_9b5ff9fad9003e8a.jpg",
+      "box": [
+        436.18,
+        218.48,
+        447.29,
+        230.27
+      ],
+      "conf": 0.5351,
+      "n_gt_in_image": 1,
+      "sample_index": 27
+    },
+    {
+      "image_id": "train/d72bf7ae01e68e93861554a56e801e5956f9f9dd18225917b8bfceaafb13f93c_6c0b5b83e6504731.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/train/d72bf7ae01e68e93861554a56e801e5956f9f9dd18225917b8bfceaafb13f93c_6c0b5b83e6504731.jpg",
+      "box": [
+        92.08,
+        262.05,
+        101.14,
+        272.79
+      ],
+      "conf": 0.5503,
+      "n_gt_in_image": 1,
+      "sample_index": 28
+    },
+    {
+      "image_id": "val/7d847f271952c2c32bee53da51da999101b1c584694d8363847a051f0749a5f3_c1297038c89bcb0d.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/7d847f271952c2c32bee53da51da999101b1c584694d8363847a051f0749a5f3_c1297038c89bcb0d.jpg",
+      "box": [
+        49.29,
+        126.18,
+        55.12,
+        131.89
+      ],
+      "conf": 0.5559,
+      "n_gt_in_image": 1,
+      "sample_index": 29
+    },
+    {
+      "image_id": "val/a809a09bf640db8cc3df5e6114a9d7568bada44683d5df78441265c3af2ce7df_c668853cdc4a258f.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/a809a09bf640db8cc3df5e6114a9d7568bada44683d5df78441265c3af2ce7df_c668853cdc4a258f.jpg",
+      "box": [
+        550.7,
+        528.92,
+        560.61,
+        539.55
+      ],
+      "conf": 0.7021,
+      "n_gt_in_image": 1,
+      "sample_index": 30
+    },
+    {
+      "image_id": "val/80c4f2e7acc2a23e235d68c0a3c0327cade6990ffef92355a5d0cc64465ed74a_0f6fcd9bcb34fae7.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/80c4f2e7acc2a23e235d68c0a3c0327cade6990ffef92355a5d0cc64465ed74a_0f6fcd9bcb34fae7.jpg",
+      "box": [
+        31.31,
+        127.43,
+        36.73,
+        132.67
+      ],
+      "conf": 0.5906,
+      "n_gt_in_image": 1,
+      "sample_index": 31
+    },
+    {
+      "image_id": "val/7a2b9291d7f44612efda06595804bb50f010aa7dff7b92e030cadba69bd68d7a_246f0b4ff885b0e1.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/7a2b9291d7f44612efda06595804bb50f010aa7dff7b92e030cadba69bd68d7a_246f0b4ff885b0e1.jpg",
+      "box": [
+        585.45,
+        247.68,
+        645.26,
+        312.16
+      ],
+      "conf": 0.5063,
+      "n_gt_in_image": 1,
+      "sample_index": 32
+    },
+    {
+      "image_id": "val/96a6c6b3db0cb6159c7534c4c7bb433387abc70f47c74468d66255f9e5f6123e_60afbb5181c265a0.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/96a6c6b3db0cb6159c7534c4c7bb433387abc70f47c74468d66255f9e5f6123e_60afbb5181c265a0.jpg",
+      "box": [
+        558.15,
+        109.93,
+        563.68,
+        115.5
+      ],
+      "conf": 0.5845,
+      "n_gt_in_image": 1,
+      "sample_index": 33
+    },
+    {
+      "image_id": "val/edb97d85cd05e468cf04d3e00c7e7a8adf6470016f32353521f18add42354902_7f2b89627bb77dfb.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/edb97d85cd05e468cf04d3e00c7e7a8adf6470016f32353521f18add42354902_7f2b89627bb77dfb.jpg",
+      "box": [
+        888.11,
+        212.02,
+        923.21,
+        247.81
+      ],
+      "conf": 0.785,
+      "n_gt_in_image": 1,
+      "sample_index": 34
+    },
+    {
+      "image_id": "val/b1cdabc20ce636fe2d445ceaae12a6521172ed8fbfe5d5e918f41b9c5d082f6d_dbf2c3eff29ceba2.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/b1cdabc20ce636fe2d445ceaae12a6521172ed8fbfe5d5e918f41b9c5d082f6d_dbf2c3eff29ceba2.jpg",
+      "box": [
+        130.0,
+        135.62,
+        134.93,
+        140.46
+      ],
+      "conf": 0.6883,
+      "n_gt_in_image": 1,
+      "sample_index": 35
+    },
+    {
+      "image_id": "val/81623a161bc5195d321b0318f770e06ad3a76cb7f8aec886cf666c7e53623379_fadcb1e6f9931049.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/81623a161bc5195d321b0318f770e06ad3a76cb7f8aec886cf666c7e53623379_fadcb1e6f9931049.jpg",
+      "box": [
+        465.34,
+        242.27,
+        472.97,
+        252.45
+      ],
+      "conf": 0.5761,
+      "n_gt_in_image": 1,
+      "sample_index": 36
+    },
+    {
+      "image_id": "train/7cc14770423d8bf580010b9fe476901237292eff148db73e5625fcdebdfb0102_805ab86d988f0f0f.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/train/7cc14770423d8bf580010b9fe476901237292eff148db73e5625fcdebdfb0102_805ab86d988f0f0f.jpg",
+      "box": [
+        304.31,
+        212.45,
+        312.71,
+        221.61
+      ],
+      "conf": 0.5364,
+      "n_gt_in_image": 1,
+      "sample_index": 37
+    },
+    {
+      "image_id": "train/4b5901b0834d4f740e29f4aa6f39afdf7d2afa656047433075f6f20241b151db_96a665718e771ed0.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/train/4b5901b0834d4f740e29f4aa6f39afdf7d2afa656047433075f6f20241b151db_96a665718e771ed0.jpg",
+      "box": [
+        455.65,
+        210.07,
+        478.82,
+        239.73
+      ],
+      "conf": 0.5827,
+      "n_gt_in_image": 0,
+      "sample_index": 38
+    },
+    {
+      "image_id": "val/a468cb9248ff49ed87f0b696bc90b206884382781cc1e1874ff9848e0e8821a3_a46f4af21cd1dfe8.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/a468cb9248ff49ed87f0b696bc90b206884382781cc1e1874ff9848e0e8821a3_a46f4af21cd1dfe8.jpg",
+      "box": [
+        175.38,
+        222.58,
+        185.18,
+        234.41
+      ],
+      "conf": 0.5564,
+      "n_gt_in_image": 1,
+      "sample_index": 39
+    },
+    {
+      "image_id": "val/aa3b90bc947323765af6957fdd241d4d2f73cf091794983ab9819ef5ca7f9a65_f8d255b214dbbf4c.jpg",
+      "image_path": "/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r1/images/val/aa3b90bc947323765af6957fdd241d4d2f73cf091794983ab9819ef5ca7f9a65_f8d255b214dbbf4c.jpg",
+      "box": [
+        558.29,
+        109.93,
+        563.66,
+        115.39
+      ],
+      "conf": 0.5274,
+      "n_gt_in_image": 1,
+      "sample_index": 40
+    }
+  ]
+}

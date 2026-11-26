@@ -1,0 +1,117 @@
+{
+  "grid_meta": {
+    "total_fps_at_min_conf": 393,
+    "min_conf": 0.5,
+    "sample_size": 40,
+    "context_scale": 3.0,
+    "seed": 42,
+    "image_path": "results/amostra_fp.png"
+  },
+  "near_or_dup_indices": [
+    1,
+    3,
+    4,
+    7,
+    10,
+    12,
+    13,
+    14,
+    15,
+    16,
+    18,
+    19,
+    20,
+    21,
+    26,
+    27,
+    30,
+    33,
+    34,
+    35,
+    36,
+    40
+  ],
+  "unannotated_indices": [
+    2,
+    5,
+    11,
+    23,
+    24,
+    25,
+    28,
+    29,
+    31
+  ],
+  "ambiguous_indices": [
+    6,
+    37
+  ],
+  "true_fp_indices": [
+    8,
+    9,
+    17,
+    22,
+    32,
+    38,
+    39
+  ],
+  "visual_notes": "20/40 são a própria bola anotada com pequeno deslocamento em caixas minúsculas de 5–12 px (0,34<=IoU<0,50, dist<=4,4 px) e 2/40 (#07, #10) são caixas duplicadas sobre a mesma bola anotada (IoU>=0,55). 9/40 são bolas extras reais paradas no gol/linha lateral não anotadas (#02,#05,#11,#23,#24,#25,#28,#29,#31) e 2/40 (#06,#37) são prováveis bolas extras borradas. Apenas 7/40 (17,5%) são FPs genuínos não-bola: ícone de bola no placar de TV (#08), letras 'O'/'2' em placas (#09,#17,#22,#32) e cabeças de goleiro/árbitro (#38,#39).",
+  "noise_adjustment": {
+    "is_estimate": true,
+    "original_labels_modified": false,
+    "n_audited": 40,
+    "n_unannotated_real_balls": 9,
+    "n_ambiguous": 2,
+    "n_true_fps": 7,
+    "unannotated_ball_rate_strict": 0.225,
+    "unannotated_ball_rate_wilson_95": [
+      0.12316091323540745,
+      0.3750309674231002
+    ],
+    "unannotated_ball_rate_including_ambiguous": 0.275,
+    "high_conf_fp_count": 393,
+    "total_fp_count": 742,
+    "adjusted_applying_rate_to_all_fps": {
+      "baseline": {
+        "estimated_unannotated_balls_in_fp": 167,
+        "tp_adjusted": 2435,
+        "fp_adjusted": 575,
+        "gt_adjusted": 3497,
+        "precision_adjusted": 0.8089700996677741,
+        "recall_adjusted": 0.6963111238204175,
+        "f1_adjusted": 0.7484247733210388
+      },
+      "filtered": {
+        "estimated_unannotated_balls_in_fp": 138,
+        "tp_adjusted": 2367,
+        "fp_adjusted": 477,
+        "gt_adjusted": 3497,
+        "precision_adjusted": 0.8322784810126582,
+        "recall_adjusted": 0.6768658850443237,
+        "f1_adjusted": 0.746569941649582
+      },
+      "delta_f1_adjusted": -0.0018548316714568358
+    },
+    "adjusted_applying_rate_only_to_high_conf_fps": {
+      "baseline": {
+        "estimated_unannotated_balls_in_fp": 88,
+        "tp_adjusted": 2356,
+        "fp_adjusted": 654,
+        "gt_adjusted": 3418,
+        "precision_adjusted": 0.7827242524916943,
+        "recall_adjusted": 0.6892919836161499,
+        "f1_adjusted": 0.7330429371499689
+      },
+      "filtered": {
+        "estimated_unannotated_balls_in_fp": 73,
+        "tp_adjusted": 2302,
+        "fp_adjusted": 542,
+        "gt_adjusted": 3418,
+        "precision_adjusted": 0.8094233473980309,
+        "recall_adjusted": 0.6734932709186658,
+        "f1_adjusted": 0.7352283615458319
+      },
+      "delta_f1_adjusted": 0.0021854243958630004
+    }
+  }
+}

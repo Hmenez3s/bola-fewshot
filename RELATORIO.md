@@ -1,109 +1,167 @@
-# Relatório: Detector de bola + filtro de falsos positivos FewShot-R18
+# Relatório: Detector de bola + filtro FewShot-R18 (Rodada 1 e Rodada 2)
 
 ## Resumo (8 linhas)
 
-1. Veredito (3 braços em `val_eval`, n=1623 imagens): FewShot-R18-bola treinado (trained_ball_layer4_pos_minus_neg_k6) deu ΔF1=-0.0220 (piora distinguível de zero); controle jogadores congelado (layer2_positive_only_k1) deu ΔF1=-0.0004 (indistinguível de zero).
-2. Viés do split: val.txt não é teste virgem (usado na seleção do checkpoint do t1b_v5_etapa1_rodada1.pt; comparação relativa justa sob o mesmo viés, valores absolutos potencialmente otimistas); jogos/grupos: train=488, val=793, interseção=0 (por jogo); val dividido por grupo (642/151, interseção=0).
-3. Métricas no teste final: Base P=0.7960/R=0.7815/F1=0.7887/mAP50=0.7251 | Jogadores congelado P=0.7984/R=0.7785/F1=0.7883/mAP50=0.7218 | Bola treinado P=0.8278/R=0.7139/F1=0.7667/mAP50=0.6685.
-4. Custo real (trained_ball_layer4_pos_minus_neg_k6): removeu 85/329 FPs (25.8%) e removeu 111/1284 bolas verdadeiras por engano (ΔRecall=-0.0676).
-5. Bootstrap pareado (2000 reamostragens): imagens IC 95% [-0.0309, -0.0129] (piora); jogos (n=151) IC 95% [-0.0622, -0.0096] (piora); treinado−congelado ΔF1=-0.0216 [-0.0310, -0.0129].
-6. Separabilidade bola vs FP (sem limiar, no eval): jogadores congelado ROC-AUC=0.5125 (PR-AUC=0.8120); bola treinado ROC-AUC=0.6244 (PR-AUC=0.8554).
-7. Viés de treino e teste virgem: taxa de FP em train=0.147/img vs val=0.203/img; teste virgem `soccernet_gsr_test_virgin` (n=490): ΔF1=-0.0123 [-0.0274, +0.0009], ROC-AUC=0.5456; box2boxcam não medido (inacessível localmente).
-8. Teto de ganho possível do detector sozinho: 329 FPs em 1623 imagens (0.203 FP/img), teto de precisão=+0.2040 e teto de F1 sem novo recall=+0.0887; configurações testadas=12.
+1. Veredito (Rodada 1 vs Rodada 2): A conclusão MUDOU na Rodada 2: com contexto ampliado, CV de 5 dobras por jogo e treino completo em train.txt, FewShot-R18-bola (treinado layer3/4) obteve melhora distinguível de zero (ΔF1=+0.0066, contra ΔF1=-0.0220 na Rodada 1).
+2. Correções aplicadas na Rodada 2: recorte quadrado `96x96` com `context_scale` ∈ `[2.0, 3.0, 4.0]` escolhido só na calibração (`2×` escolhido em 4/5 dobras, `3×` em 1/5), CV aninhada de 5 dobras por jogo sobre todo o `val.txt` (3247 imagens, 793 jogos; `train∩val=0`), mineração em todo o `train.txt` (32852 imagens) e 5760 episódios.
+3. Métricas OOF na Rodada 2 (todo `val.txt`, imgsz=1920, conf=0.35): Base P=0.7535/R=0.6811/F1=0.7155/mAP50=0.6032 | Congelado P=0.7548/R=0.6796/F1=0.7152/mAP50=0.6019 | Treinado layer3/4 P=0.7838/R=0.6694/F1=0.7221/mAP50=0.6002 | Treinado todas camadas P=0.7716/R=0.6676/F1=0.7158/mAP50=0.5982.
+4. Custo real (FewShot-R18-bola (treinado layer3/4)): removeu 127/742 FPs (17.1%; sendo 110 FPs distantes `IoU<0.10`) e removeu 39/2268 bolas verdadeiras por engano (ΔRecall=-0.0117).
+5. Bootstrap pareado (2000 reamostragens) para `trained_ball_layer34` vs Base: jogos (n=793) ΔF1=+0.0066 IC 95% [+0.0011, +0.0124] (melhora); imagens (n=3247) IC 95% [+0.0029, +0.0103]; média das 5 dobras=+0.0056±0.0074; supera também o controle congelado (ΔF1=+0.0068, IC jogos [+0.0011, +0.0130]).
+6. Separabilidade OOF bola vs FP (ROC-AUC): `conf` do detector YOLO=0.7395; jogadores congelado média/dobra=0.5159; bola treinado layer3/4 média/dobra=0.6598 (melhor config fixa OOF=0.7131 em `ctx3`); todas camadas média/dobra=0.6296 (colapsou no treino).
+7. Rótulo ruidoso (`results/amostra_fp.png`, 40 FPs em conf>=0.50): 9/40 (22.5%, IC Wilson [12.3%, 37.5%]) são bolas extras não anotadas (+2 duvidosos) e 22/40 (55,0%) são quase-acertos/duplicados da bola anotada; descontando bolas não anotadas, ΔF1 estimado=-0.0019. `soccernet_gsr_test_virgin` descartado como prova (caixas GT deslocadas).
+8. Viés e teto de ganho: `val.txt` não é teste virgem do detector (usado na escolha do checkpoint; comparação relativa justa, absolutos possivelmente otimistas); FP/img `train`=0.0554 vs `val`=0.2285; headroom base em `val`=+0.2465 em precisão e +0.0948 em F1; configurações testadas: Rodada 1=12, Rodada 2=36 fixas + 3 seletores CV aninhados.
 
-## Comparação principal no conjunto de teste final
+## Rodada 2 — Validação cruzada aninhada (5 dobras por jogo, contexto 2×/3×/4×, treino completo)
 
-Detector: `t1b_v5_etapa1_rodada1.pt` | Controle congelado: `six-references.pth` | imgsz=1920 | conf=0.35 | IoU=0.5 | Split final: `val_eval` (1623 imagens, 1643 bolas GT).
+Detector: `t1b_v5_etapa1_rodada1.pt` (`imgsz=1920`, `conf=0.35`, `IoU=0.5`) | Conjunto avaliado: todo o `val.txt` (3247 imagens, 3330 bolas GT, 793 jogos; `train∩val=0` jogos). Aviso de viés: `val.txt` foi usado pelo detector para escolher o melhor checkpoint (não é teste virgem; comparação entre braços sob o mesmo viés).
 
-| Braço | Configuração | K | Limiar congelado | Precisão | Recall | F1 | mAP50 | mAP50-95 | FPs removidos | TPs removidos | ΔF1 (IC 95% imgs) | Distinguível de zero? |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| Detector sozinho | baseline | - | - | 0.7960 | 0.7815 | 0.7887 | 0.7251 | 0.3577 | 0 / 329 | 0 / 1284 | 0.0000 | - |
-| FewShot-R18 jogadores (congelado) | `layer4_positive_only_k1` | 1 | 0.5716 | 0.7959 | 0.7809 | 0.7883 | 0.7245 | 0.3575 | 0 / 329 | 1 / 1284 | -0.0004 [-0.0011, +0.0000] | Não (indistinguível) |
-| FewShot-R18 jogadores (congelado) | `layer4_positive_only_k6` | 6 | -inf (sem corte) | 0.7960 | 0.7815 | 0.7887 | 0.7251 | 0.3577 | 0 / 329 | 0 / 1284 | +0.0000 [+0.0000, +0.0000] | Não (indistinguível) |
-| FewShot-R18 jogadores (congelado) | `layer4_pos_minus_neg_k1` | 1 | -0.2767 | 0.7964 | 0.7809 | 0.7886 | 0.7247 | 0.3575 | 1 / 329 | 1 / 1284 | -0.0001 [-0.0011, +0.0007] | Não (indistinguível) |
-| FewShot-R18 jogadores (congelado) | `layer4_pos_minus_neg_k6` | 6 | -0.1107 | 0.7965 | 0.7815 | 0.7889 | 0.7257 | 0.3580 | 1 / 329 | 0 / 1284 | +0.0002 [+0.0000, +0.0007] | Não (indistinguível) |
-| FewShot-R18 jogadores (congelado) | `layer3_positive_only_k1` | 1 | 0.8632 | 0.7959 | 0.7809 | 0.7883 | 0.7244 | 0.3572 | 0 / 329 | 1 / 1284 | -0.0004 [-0.0011, +0.0000] | Não (indistinguível) |
-| FewShot-R18 jogadores (congelado) | `layer3_positive_only_k6` | 6 | 0.8987 | 0.7955 | 0.7791 | 0.7872 | 0.7224 | 0.3556 | 0 / 329 | 4 / 1284 | -0.0015 [-0.0030, -0.0004] | Sim (piora) |
-| FewShot-R18 jogadores (congelado) | `layer2_positive_only_k1` (ctrl, melhor-calib) | 1 | 0.9475 | 0.7984 | 0.7785 | 0.7883 | 0.7218 | 0.3551 | 6 / 329 | 5 / 1284 | -0.0004 [-0.0024, +0.0013] | Não (indistinguível) |
-| FewShot-R18 jogadores (congelado) | `layer2_positive_only_k6` | 6 | 0.9600 | 0.7970 | 0.7766 | 0.7867 | 0.7201 | 0.3544 | 4 / 329 | 8 / 1284 | -0.0020 [-0.0043, -0.0002] | Sim (piora) |
-| FewShot-R18-bola (treinado) | `trained_ball_layer4_pos_minus_neg_k1` | 1 | -0.0539 | 0.8278 | 0.7139 | 0.7667 | 0.6685 | 0.3362 | 85 / 329 | 111 / 1284 | -0.0220 [-0.0308, -0.0128] | Sim (piora) |
-| FewShot-R18-bola (treinado) | `trained_ball_layer4_pos_minus_neg_k6` (bola) | 6 | -0.0151 | 0.8278 | 0.7139 | 0.7667 | 0.6685 | 0.3362 | 85 / 329 | 111 / 1284 | -0.0220 [-0.0309, -0.0129] | Sim (piora) |
-| FewShot-R18-bola (treinado) | `trained_ball_layer4_positive_only_k1` | 1 | 0.9234 | 0.8280 | 0.7152 | 0.7675 | 0.6696 | 0.3364 | 85 / 329 | 109 / 1284 | -0.0212 [-0.0299, -0.0120] | Sim (piora) |
-| FewShot-R18-bola (treinado) | `trained_ball_layer4_positive_only_k6` | 6 | 0.8574 | 0.7970 | 0.7815 | 0.7892 | 0.7251 | 0.3577 | 2 / 329 | 0 / 1284 | +0.0005 [+0.0000, +0.0012] | Não (indistinguível) |
+### Comparação OOF agregada dos braços (seleção aninhada de contexto, K, época e limiar por dobra)
 
-Seleção de checkpoint, camada, K e limiar ocorreu exclusivamente em `val_calib`, congelada antes de medir `val_eval`.
+| Braço | Precisão | Recall | F1 | mAP50 | mAP50-95 | FPs removidos | TPs removidos | ROC-AUC (média 5 dobras) | ΔF1 (IC 95% jogos) | ΔF1 (IC 95% imgs) | Média±DP (5 dobras) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Detector sozinho (baseline) | 0.7535 | 0.6811 | 0.7155 | 0.6032 | 0.2875 | 0 / 742 | 0 / 2268 | 0.7395 (`conf`) | 0.0000 | 0.0000 | 0.0000 |
+| Referência: subir `conf` do YOLO (CV 5 dobras) | 0.7723 | 0.6721 | 0.7187 | 0.5964 | 0.2849 | 82 / 742 | 30 / 2268 | 0.7395 | +0.0032 [-0.0023, +0.0061] | [+0.0003, +0.0061] | +0.0018 ± 0.0028 |
+| FewShot-R18 jogadores (congelado) | 0.7548 | 0.6796 | 0.7152 | 0.6019 | 0.2871 | 7 / 742 | 5 / 2268 | 0.5159 | -0.0002 [-0.0020, +0.0007] | [-0.0012, +0.0006] | -0.0005 ± 0.0014 |
+| FewShot-R18-bola (treinado layer3/4) | 0.7838 | 0.6694 | 0.7221 | 0.6002 | 0.2863 | 127 / 742 | 39 / 2268 | 0.6598 | +0.0066 [+0.0011, +0.0124] | [+0.0029, +0.0103] | +0.0056 ± 0.0074 |
+| FewShot-R18-bola (treinado todas camadas) | 0.7716 | 0.6676 | 0.7158 | 0.5982 | 0.2838 | 83 / 742 | 46 / 2268 | 0.6296 | +0.0004 [-0.0067, +0.0040] | [-0.0030, +0.0035] | -0.0015 ± 0.0060 |
 
-## O FewShot-R18 separa bola de falso positivo?
+### Escolhas congeladas por dobra (sem olhar a dobra de teste)
 
-| Braço | Configuração | Camada | Modo | K pos / neg | ROC-AUC (calib) | PR-AUC (calib) | ROC-AUC (eval) | PR-AUC (eval) | TP / FP (eval) |
-|---|---|---|---|---:|---:|---:|---:|---:|---:|
-| Detector sozinho (referência `conf`) | `detector_conf` | - | `conf` | - | 0.6934 | 0.8281 | 0.7786 | 0.9256 | 1284 / 329 |
-| FewShot-R18 jogadores (congelado) | `layer4_positive_only_k1` | `layer4` | `positive_only` | 1 / 0 | 0.5837 | 0.7506 | 0.4393 | 0.7696 | 1284 / 329 |
-| FewShot-R18 jogadores (congelado) | `layer4_positive_only_k6` | `layer4` | `positive_only` | 6 / 0 | 0.5757 | 0.7466 | 0.3752 | 0.7388 | 1284 / 329 |
-| FewShot-R18 jogadores (congelado) | `layer4_pos_minus_neg_k1` | `layer4` | `pos_minus_neg` | 1 / 1 | 0.5490 | 0.7187 | 0.5740 | 0.8213 | 1284 / 329 |
-| FewShot-R18 jogadores (congelado) | `layer4_pos_minus_neg_k6` | `layer4` | `pos_minus_neg` | 6 / 6 | 0.5202 | 0.7011 | 0.5660 | 0.8234 | 1284 / 329 |
-| FewShot-R18 jogadores (congelado) | `layer3_positive_only_k1` | `layer3` | `positive_only` | 1 / 0 | 0.6708 | 0.7941 | 0.4396 | 0.7830 | 1284 / 329 |
-| FewShot-R18 jogadores (congelado) | `layer3_positive_only_k6` | `layer3` | `positive_only` | 6 / 0 | 0.6451 | 0.7759 | 0.4131 | 0.7575 | 1284 / 329 |
-| FewShot-R18 jogadores (congelado) | `layer2_positive_only_k1` | `layer2` | `positive_only` | 1 / 0 | 0.6502 | 0.7778 | 0.5125 | 0.8120 | 1284 / 329 |
-| FewShot-R18 jogadores (congelado) | `layer2_positive_only_k6` | `layer2` | `positive_only` | 6 / 0 | 0.6319 | 0.7679 | 0.4504 | 0.7760 | 1284 / 329 |
-| FewShot-R18-bola (treinado) | `trained_ball_layer4_pos_minus_neg_k1` | `layer4` | `pos_minus_neg` | 1 / 1 | 0.7040 | 0.8239 | 0.6244 | 0.8554 | 1284 / 329 |
-| FewShot-R18-bola (treinado) | `trained_ball_layer4_pos_minus_neg_k6` | `layer4` | `pos_minus_neg` | 6 / 6 | 0.7042 | 0.8240 | 0.6244 | 0.8554 | 1284 / 329 |
-| FewShot-R18-bola (treinado) | `trained_ball_layer4_positive_only_k1` | `layer4` | `positive_only` | 1 / 0 | 0.6773 | 0.7939 | 0.6143 | 0.8437 | 1284 / 329 |
-| FewShot-R18-bola (treinado) | `trained_ball_layer4_positive_only_k6` | `layer4` | `positive_only` | 6 / 0 | 0.5263 | 0.7257 | 0.5432 | 0.8212 | 1284 / 329 |
+#### FewShot-R18 jogadores (congelado)
 
-## Treino episódico do FewShot-R18-bola (receita do paper)
+| Dobra | Imagens | Config escolhida (calib) | Época | Limiar congelado | AUC calib | AUC dobra | F1 base dobra | F1 filt dobra | ΔF1 dobra | FPs rem | TPs rem |
+|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 1111 | `frozen_ctx4_pos_minus_neg_k1` | 0 | -0.2810 | 0.4967 | 0.5064 | 0.8548 | 0.8548 | +0.0000 | 0 | 0 |
+| 1 | 534 | `frozen_ctx2_positive_only_k1` | 0 | 0.3880 | 0.5114 | 0.4786 | 0.6155 | 0.6125 | -0.0030 | 2 | 3 |
+| 2 | 534 | `frozen_ctx2_positive_only_k1` | 0 | 0.3739 | 0.5029 | 0.5477 | 0.6545 | 0.6545 | -0.0000 | 2 | 1 |
+| 3 | 534 | `frozen_ctx4_pos_minus_neg_k1` | 0 | -0.2810 | 0.5093 | 0.4814 | 0.6073 | 0.6073 | +0.0000 | 0 | 0 |
+| 4 | 534 | `frozen_ctx2_positive_only_k1` | 0 | 0.3717 | 0.5018 | 0.5656 | 0.6564 | 0.6570 | +0.0006 | 3 | 1 |
+- Decomposição `v14` vs resto: `v14` (1111 imgs) F1 base=0.8548 → filt=0.8548 (Δ=+0.0000); demais 792 jogos (2136 imgs) F1 base=0.6330 → filt=0.6324 (Δ=-0.0006).
 
-- Arquitetura e otimização: ResNet-18 ImageNet (`fc=Identity`, apenas `layer3` e `layer4` treináveis, `BatchNorm2d` em `eval`), entrada letterbox RGB `[48, 96]`, `AdamW(lr=0.0002, wd=0.0001)`, `CosineAnnealingLR`, `8` épocas × `180` episódios (`k_suporte=6`, `n_query=8` por classe, `cosine * 20.0`, seed `25`).
-- Dispositivo e velocidade: `mps`, 1º episódio `0.4368s`, tempo total `119.83s`, melhor época selecionada em `val_calib`: época `4`.
-- Mineração em `train.txt` (`1500` imagens varridas com `conf>=0.05`): `1489` recortes positivos, `220` FPs de alta confiança (`>=0.35`), `2145` FPs minerados em baixa confiança (`0.05..0.35`), `0` recortes suplementares de fundo.
-- Viés de treino do detector (`conf>=0.35`): taxa de FP em `train` = `0.1467` FP/img (`220` FPs, precisão `0.8306`) vs em `val_eval` = `0.2027` FP/img (`329` FPs, precisão `0.7960`).
+#### FewShot-R18-bola (treinado layer3/4)
 
-| Época | Loss treino | ROC-AUC (`val_calib`) | PR-AUC (`val_calib`) | Melhor F1 (`val_calib`) | Tempo (s) |
-|---:|---:|---:|---:|---:|---:|
-| 1 | 0.5710 | 0.6854 | 0.8083 | 0.6451 | 9.4 |
-| 2 | 0.5189 | 0.6892 | 0.7952 | 0.6444 | 9.1 |
-| 3 | 0.4816 | 0.6956 | 0.8122 | 0.6460 | 15.1 |
-| 4 * | 0.4079 | 0.7042 | 0.8240 | 0.6442 | 16.8 |
-| 5 | 0.3776 | 0.6702 | 0.7955 | 0.6443 | 17.2 |
-| 6 | 0.3270 | 0.6953 | 0.8110 | 0.6446 | 17.6 |
-| 7 | 0.2789 | 0.6964 | 0.8085 | 0.6451 | 17.2 |
-| 8 | 0.2633 | 0.6907 | 0.8054 | 0.6450 | 17.1 |
+| Dobra | Imagens | Config escolhida (calib) | Época | Limiar congelado | AUC calib | AUC dobra | F1 base dobra | F1 filt dobra | ΔF1 dobra | FPs rem | TPs rem |
+|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 1111 | `trained_ball_layer34_ctx2_positive_only_k6` | 13 | 0.8491 | 0.6241 | 0.6207 | 0.8548 | 0.8565 | +0.0017 | 10 | 4 |
+| 1 | 534 | `trained_ball_layer34_ctx2_positive_only_k1` | 16 | 0.6905 | 0.6973 | 0.6778 | 0.6155 | 0.6245 | +0.0089 | 25 | 5 |
+| 2 | 534 | `trained_ball_layer34_ctx2_pos_minus_neg_k6` | 16 | -0.1561 | 0.6946 | 0.6926 | 0.6545 | 0.6590 | +0.0044 | 27 | 10 |
+| 3 | 534 | `trained_ball_layer34_ctx2_positive_only_k6` | 13 | 0.8491 | 0.6183 | 0.6447 | 0.6073 | 0.6236 | +0.0163 | 45 | 8 |
+| 4 | 534 | `trained_ball_layer34_ctx3_pos_minus_neg_k6` | 8 | -0.1540 | 0.7208 | 0.6631 | 0.6564 | 0.6532 | -0.0032 | 20 | 12 |
+- Decomposição `v14` vs resto: `v14` (1111 imgs) F1 base=0.8548 → filt=0.8565 (Δ=+0.0017); demais 792 jogos (2136 imgs) F1 base=0.6330 → filt=0.6399 (Δ=+0.0068).
 
-## Teto de ganho possível (headroom)
+#### FewShot-R18-bola (treinado todas camadas)
 
-- Detecções base no eval: 1613 (1284 TP, 329 FP, 359 FN; 0.203 FP/imagem).
-- Precisão base: 0.7960 → teto teórico com filtro perfeito: 1.0000 (ganho máximo de precisão: +0.2040).
-- F1 base: 0.7887 → teto teórico sem novo recall: 0.8773 (ganho máximo de F1: +0.0887).
+| Dobra | Imagens | Config escolhida (calib) | Época | Limiar congelado | AUC calib | AUC dobra | F1 base dobra | F1 filt dobra | ΔF1 dobra | FPs rem | TPs rem |
+|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 1111 | `trained_ball_all_layers_ctx3_pos_minus_neg_k6` | 15 | -0.0000 | 0.6322 | 0.5484 | 0.8548 | 0.8544 | -0.0005 | 0 | 1 |
+| 1 | 534 | `trained_ball_all_layers_ctx4_positive_only_k1` | 1 | 0.9921 | 0.6176 | 0.6788 | 0.6155 | 0.6218 | +0.0063 | 32 | 10 |
+| 2 | 534 | `trained_ball_all_layers_ctx4_positive_only_k1` | 1 | 0.9925 | 0.6257 | 0.6365 | 0.6545 | 0.6456 | -0.0089 | 22 | 17 |
+| 3 | 534 | `trained_ball_all_layers_ctx2_positive_only_k6` | 1 | 0.9915 | 0.5921 | 0.6922 | 0.6073 | 0.6086 | +0.0013 | 16 | 6 |
+| 4 | 534 | `trained_ball_all_layers_ctx2_pos_minus_neg_k1` | 1 | -0.0009 | 0.6165 | 0.5921 | 0.6564 | 0.6505 | -0.0059 | 13 | 12 |
+- Decomposição `v14` vs resto: `v14` (1111 imgs) F1 base=0.8548 → filt=0.8544 (Δ=-0.0005); demais 792 jogos (2136 imgs) F1 base=0.6330 → filt=0.6312 (Δ=-0.0018).
 
-## Protocolo, higiene de splits e escolhas
+### Comparação direta entre braços treinados e controle congelado (bootstrap pareado OOF)
 
-- Fonte dos splits: `/Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r5_9010/data.yaml` (lista de validação: `data.yaml:val`; disjunção `train`/`val` verificada: `True`).
-- Referências do filtro: sorteadas automaticamente apenas de `train` (`train_ref`: 32852 imagens, 32719 bolas GT) com seed fixa `42`.
-- Calibração do limiar: `val_split` (`val_calib`, 1624 imagens, fração `0.5`). Limiar congelado antes de tocar `val_eval` (1623 imagens).
-- Pré-processamento do crop: canvas letterbox RGB `[48, 96]`, `context_scale=1.0`, `square_crop=False`.
-- Configurações testadas: 12 (política de variações `always`, gatilho AUC `< 0.7`, variações executadas: `True`).
-- Escolha geral na calibração: `layer2_positive_only_k1` — selected strictly on 'val_calib' by highest calibration F1 (0.6452 vs baseline 0.6381), tie-broken by recall and calib ROC-AUC; threshold frozen before opening 'val_eval'.
-- Auditoria por jogo/grupo: `train`=488 grupos, `val`=793 grupos, interseção `train∩val`=0 (split por jogo); `val_calib`=642 grupos vs `val_eval`=151 grupos (interseção=0).
-- Status do conjunto de validação: val.txt não é teste virgem (usado na seleção do checkpoint do t1b_v5_etapa1_rodada1.pt; comparação relativa justa sob o mesmo viés, valores absolutos potencialmente otimistas).
+- `trained_ball_layer34_minus_frozen_players`: ΔF1=+0.0068 | IC 95% jogos [+0.0011, +0.0130] (melhora) | IC 95% imagens [+0.0030, +0.0107] (melhora).
+- `trained_ball_all_layers_minus_frozen_players`: ΔF1=+0.0006 | IC 95% jogos [-0.0066, +0.0043] (indistinguível) | IC 95% imagens [-0.0029, +0.0039] (indistinguível).
 
-## Conjuntos extras / teste virgem fora de r1
+### Todas as configurações fixas testadas na Rodada 2 (OOF 5 dobras)
 
-### soccernet_gsr_test_virgin
-
-Imagens: 490 | Bolas GT: 456 | Protótipos e limiares congelados (sem reajuste neste conjunto).
-
-| Braço | Configuração congelada | Limiar | Precisão | Recall | F1 | mAP50 | FPs removidos | TPs removidos | ROC-AUC | ΔF1 (IC 95%) |
+| Braço | Configuração | ROC-AUC OOF | PR-AUC OOF | Precisão | Recall | F1 | mAP50 | FPs rem | TPs rem | ΔF1 (IC 95% jogos) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Detector sozinho | baseline | - | 0.5308 | 0.4342 | 0.4777 | 0.2701 | 0 / 175 | 0 / 198 | 0.5814 | 0.0000 |
-| FewShot-R18 jogadores (congelado) | `layer2_positive_only_k1` | 0.9475 | 0.5135 | 0.3750 | 0.4335 | 0.2268 | 13 / 175 | 27 / 198 | 0.3884 | -0.0442 [-0.0636, -0.0254] |
-| FewShot-R18-bola (treinado) | `trained_ball_layer4_pos_minus_neg_k6` | -0.0151 | 0.5457 | 0.4057 | 0.4654 | 0.2545 | 21 / 175 | 13 / 198 | 0.5456 | -0.0123 [-0.0274, +0.0009] |
+| FewShot-R18 jogadores (congelado) | `frozen_ctx2_pos_minus_neg_k1` | 0.5518 | 0.7679 | 0.7543 | 0.6805 | 0.7155 | 0.6028 | 4/742 | 2/2268 | +0.0000 [-0.0010, +0.0008] |
+| FewShot-R18 jogadores (congelado) | `frozen_ctx2_pos_minus_neg_k6` | 0.5645 | 0.7660 | 0.7537 | 0.6802 | 0.7151 | 0.6026 | 2/742 | 3/2268 | -0.0004 [-0.0015, +0.0001] |
+| FewShot-R18 jogadores (congelado) | `frozen_ctx2_positive_only_k1` | 0.5115 | 0.7501 | 0.7560 | 0.6793 | 0.7156 | 0.6022 | 12/742 | 6/2268 | +0.0001 [-0.0016, +0.0015] |
+| FewShot-R18 jogadores (congelado) | `frozen_ctx2_positive_only_k6` | 0.5399 | 0.7663 | 0.7532 | 0.6793 | 0.7144 | 0.6020 | 1/742 | 6/2268 | -0.0011 [-0.0036, +0.0000] |
+| FewShot-R18 jogadores (congelado) | `frozen_ctx3_pos_minus_neg_k1` | 0.5235 | 0.7491 | 0.7538 | 0.6796 | 0.7148 | 0.6018 | 2/742 | 6/2268 | -0.0007 [-0.0026, +0.0002] |
+| FewShot-R18 jogadores (congelado) | `frozen_ctx3_pos_minus_neg_k6` | 0.5306 | 0.7587 | 0.7534 | 0.6790 | 0.7143 | 0.6009 | 2/742 | 7/2268 | -0.0012 [-0.0039, -0.0000] |
+| FewShot-R18 jogadores (congelado) | `frozen_ctx3_positive_only_k1` | 0.4385 | 0.7113 | 0.7535 | 0.6811 | 0.7155 | 0.6032 | 0/742 | 0/2268 | +0.0000 [+0.0000, +0.0000] |
+| FewShot-R18 jogadores (congelado) | `frozen_ctx3_positive_only_k6` | 0.5336 | 0.7490 | 0.7536 | 0.6796 | 0.7147 | 0.6020 | 2/742 | 5/2268 | -0.0008 [-0.0032, +0.0002] |
+| FewShot-R18 jogadores (congelado) | `frozen_ctx4_pos_minus_neg_k1` | 0.5112 | 0.7406 | 0.7553 | 0.6805 | 0.7160 | 0.6028 | 8/742 | 2/2268 | +0.0005 [-0.0006, +0.0018] |
+| FewShot-R18 jogadores (congelado) | `frozen_ctx4_pos_minus_neg_k6` | 0.5386 | 0.7708 | 0.7537 | 0.6811 | 0.7156 | 0.6032 | 1/742 | 0/2268 | +0.0001 [+0.0000, +0.0005] |
+| FewShot-R18 jogadores (congelado) | `frozen_ctx4_positive_only_k1` | 0.4515 | 0.7115 | 0.7535 | 0.6811 | 0.7155 | 0.6032 | 0/742 | 0/2268 | +0.0000 [+0.0000, +0.0000] |
+| FewShot-R18 jogadores (congelado) | `frozen_ctx4_positive_only_k6` | 0.5211 | 0.7516 | 0.7535 | 0.6802 | 0.7150 | 0.6024 | 1/742 | 3/2268 | -0.0005 [-0.0018, +0.0001] |
+| FewShot-R18-bola (treinado layer3/4) | `trained_ball_layer34_ctx2_pos_minus_neg_k1` | 0.6953 | 0.8386 | 0.7852 | 0.6706 | 0.7234 | 0.6014 | 131/742 | 35/2268 | +0.0079 [+0.0028, +0.0141] |
+| FewShot-R18-bola (treinado layer3/4) | `trained_ball_layer34_ctx2_pos_minus_neg_k6` | 0.6948 | 0.8395 | 0.7850 | 0.6709 | 0.7234 | 0.6015 | 130/742 | 34/2268 | +0.0080 [+0.0030, +0.0145] |
+| FewShot-R18-bola (treinado layer3/4) | `trained_ball_layer34_ctx2_positive_only_k1` | 0.6948 | 0.8390 | 0.7869 | 0.6709 | 0.7243 | 0.6018 | 137/742 | 34/2268 | +0.0088 [+0.0038, +0.0151] |
+| FewShot-R18-bola (treinado layer3/4) | `trained_ball_layer34_ctx2_positive_only_k6` | 0.6341 | 0.7932 | 0.7855 | 0.6709 | 0.7237 | 0.6017 | 132/742 | 34/2268 | +0.0082 [+0.0032, +0.0145] |
+| FewShot-R18-bola (treinado layer3/4) | `trained_ball_layer34_ctx3_pos_minus_neg_k1` | 0.7131 | 0.8672 | 0.7750 | 0.6724 | 0.7201 | 0.6010 | 91/742 | 30/2268 | +0.0046 [-0.0004, +0.0093] |
+| FewShot-R18-bola (treinado layer3/4) | `trained_ball_layer34_ctx3_pos_minus_neg_k6` | 0.7128 | 0.8652 | 0.7750 | 0.6724 | 0.7201 | 0.6010 | 91/742 | 30/2268 | +0.0046 [-0.0004, +0.0093] |
+| FewShot-R18-bola (treinado layer3/4) | `trained_ball_layer34_ctx3_positive_only_k1` | 0.7084 | 0.8630 | 0.7787 | 0.6709 | 0.7208 | 0.6007 | 106/742 | 35/2268 | +0.0053 [-0.0002, +0.0103] |
+| FewShot-R18-bola (treinado layer3/4) | `trained_ball_layer34_ctx3_positive_only_k6` | 0.5297 | 0.7507 | 0.7787 | 0.6709 | 0.7208 | 0.6007 | 106/742 | 35/2268 | +0.0053 [-0.0002, +0.0103] |
+| FewShot-R18-bola (treinado layer3/4) | `trained_ball_layer34_ctx4_pos_minus_neg_k1` | 0.6994 | 0.8688 | 0.7815 | 0.6628 | 0.7173 | 0.5946 | 121/742 | 65/2268 | +0.0018 [-0.0069, +0.0059] |
+| FewShot-R18-bola (treinado layer3/4) | `trained_ball_layer34_ctx4_pos_minus_neg_k6` | 0.6922 | 0.8649 | 0.7818 | 0.6628 | 0.7174 | 0.5946 | 122/742 | 65/2268 | +0.0019 [-0.0067, +0.0061] |
+| FewShot-R18-bola (treinado layer3/4) | `trained_ball_layer34_ctx4_positive_only_k1` | 0.6996 | 0.8671 | 0.7815 | 0.6628 | 0.7173 | 0.5946 | 121/742 | 65/2268 | +0.0018 [-0.0069, +0.0059] |
+| FewShot-R18-bola (treinado layer3/4) | `trained_ball_layer34_ctx4_positive_only_k6` | 0.5742 | 0.7824 | 0.7760 | 0.6658 | 0.7167 | 0.5961 | 100/742 | 53/2268 | +0.0012 [-0.0064, +0.0051] |
+| FewShot-R18-bola (treinado todas camadas) | `trained_ball_all_layers_ctx2_pos_minus_neg_k1` | 0.6116 | 0.8019 | 0.7699 | 0.6724 | 0.7179 | 0.6021 | 72/742 | 30/2268 | +0.0024 [-0.0027, +0.0062] |
+| FewShot-R18-bola (treinado todas camadas) | `trained_ball_all_layers_ctx2_pos_minus_neg_k6` | 0.6159 | 0.7979 | 0.7694 | 0.6703 | 0.7164 | 0.5995 | 72/742 | 37/2268 | +0.0010 [-0.0035, +0.0053] |
+| FewShot-R18-bola (treinado todas camadas) | `trained_ball_all_layers_ctx2_positive_only_k1` | 0.6011 | 0.7910 | 0.7698 | 0.6718 | 0.7174 | 0.6012 | 72/742 | 32/2268 | +0.0020 [-0.0033, +0.0056] |
+| FewShot-R18-bola (treinado todas camadas) | `trained_ball_all_layers_ctx2_positive_only_k6` | 0.6196 | 0.8074 | 0.7698 | 0.6718 | 0.7174 | 0.6012 | 72/742 | 32/2268 | +0.0020 [-0.0033, +0.0056] |
+| FewShot-R18-bola (treinado todas camadas) | `trained_ball_all_layers_ctx3_pos_minus_neg_k1` | 0.5848 | 0.7754 | 0.7657 | 0.6754 | 0.7177 | 0.6021 | 53/742 | 20/2268 | +0.0023 [-0.0007, +0.0058] |
+| FewShot-R18-bola (treinado todas camadas) | `trained_ball_all_layers_ctx3_pos_minus_neg_k6` | 0.6057 | 0.7925 | 0.7673 | 0.6763 | 0.7189 | 0.6021 | 59/742 | 16/2268 | +0.0035 [+0.0002, +0.0078] |
+| FewShot-R18-bola (treinado todas camadas) | `trained_ball_all_layers_ctx3_positive_only_k1` | 0.6410 | 0.8121 | 0.7652 | 0.6745 | 0.7170 | 0.6008 | 52/742 | 23/2268 | +0.0015 [-0.0026, +0.0052] |
+| FewShot-R18-bola (treinado todas camadas) | `trained_ball_all_layers_ctx3_positive_only_k6` | 0.6507 | 0.8215 | 0.7646 | 0.6739 | 0.7164 | 0.5995 | 51/742 | 24/2268 | +0.0009 [-0.0027, +0.0054] |
+| FewShot-R18-bola (treinado todas camadas) | `trained_ball_all_layers_ctx4_pos_minus_neg_k1` | 0.5333 | 0.7561 | 0.7561 | 0.6787 | 0.7153 | 0.6015 | 12/742 | 9/2268 | -0.0002 [-0.0015, +0.0026] |
+| FewShot-R18-bola (treinado todas camadas) | `trained_ball_all_layers_ctx4_pos_minus_neg_k6` | 0.6231 | 0.8149 | 0.7769 | 0.6682 | 0.7184 | 0.5991 | 103/742 | 43/2268 | +0.0030 [-0.0041, +0.0075] |
+| FewShot-R18-bola (treinado todas camadas) | `trained_ball_all_layers_ctx4_positive_only_k1` | 0.5919 | 0.7894 | 0.7767 | 0.6685 | 0.7185 | 0.5992 | 102/742 | 42/2268 | +0.0031 [-0.0039, +0.0076] |
+| FewShot-R18-bola (treinado todas camadas) | `trained_ball_all_layers_ctx4_positive_only_k6` | 0.5856 | 0.7846 | 0.7767 | 0.6685 | 0.7185 | 0.5992 | 102/742 | 42/2268 | +0.0031 [-0.0039, +0.0076] |
 
-- `box2boxcam` (câmera amadora/noturna, 198 quadros): não medido por não estar disponível localmente.
+### Mineração no `train.txt` inteiro e treino episódico (Rodada 2)
+
+- Mineração completa: `32852` imagens de `train.txt` varridas (`imgsz=1280`, `conf>=0.05`): `26736` TPs e `1820` FPs em `conf>=0.35` (`0.0554` FP/img, precisão `0.9363`) + `21172` FPs minerados em baixa confiança (`0.05..0.35`), `0` recortes artificiais de fundo.
+- Comparação de taxa de FP (viés de treino do detector): `train.txt` = `0.0554` FP/img (a `imgsz=1280`) vs `val.txt` = `0.2285` FP/img (`742` FPs em `3247` imagens a `imgsz=1920`).
+- Receita de treino: ResNet-18 ImageNet (`fc=Identity`, `BatchNorm2d` em `eval`), recorte quadrado `96x96`, `AdamW(lr=2e-4, wd=1e-4)`, `CosineAnnealingLR`, `16` épocas × `360` episódios = `5760` episódios (4× a Rodada 1), `cosine * 20`, seed `25`. Testado para `layer3/4` (receita do paper) e variação `all_layers` (todas as camadas treináveis), nos contextos `2×`, `3×` e `4×`.
+
+| Braço | Contexto | Camadas | Pool pos / neg | Loss época 1 | Loss época final | Tempo treino (s) |
+|---|---:|---|---|---:|---:|---:|
+| FewShot-R18-bola (treinado layer3/4) | 2× | `layer3_layer4` | 12000 / 8329 | 0.5988 | 0.1025 | 275.1 |
+| FewShot-R18-bola (treinado todas camadas) | 2× | `all` | 12000 / 8329 | 0.6770 | 0.6931 | 368.2 |
+| FewShot-R18-bola (treinado layer3/4) | 3× | `layer3_layer4` | 12000 / 8329 | 0.5680 | 0.0638 | 224.9 |
+| FewShot-R18-bola (treinado todas camadas) | 3× | `all` | 12000 / 8329 | 0.6680 | 0.6931 | 319.9 |
+| FewShot-R18-bola (treinado layer3/4) | 4× | `layer3_layer4` | 12000 / 8329 | 0.5693 | 0.0554 | 220.8 |
+| FewShot-R18-bola (treinado todas camadas) | 4× | `all` | 12000 / 8329 | 0.6838 | 0.6931 | 311.5 |
+
+## Auditoria de rótulo ruidoso no `val.txt` (`results/amostra_fp.png`)
+
+Dos `393` FPs do detector em `conf >= 0.5` no `val.txt`, sorteamos uma amostra fixa de `40` recortes (seed `42`, margem `3×`, caixa vermelha = detecção YOLO), salva em `results/amostra_fp.png` e inspecionada visualmente:
+
+- **Bolas reais não anotadas (bolas extras fora de jogo / linha / gol)**: `9/40` (22.5%, IC Wilson 95%: [12.3%, 37.5%]). Índices: `[2, 5, 11, 23, 24, 25, 28, 29, 31]`.
+- **Bola real já anotada com IoU < 0,50 ou caixa duplicada**: `22/40` (55.0%). Índices: `[1, 3, 4, 7, 10, 12, 13, 14, 15, 16, 18, 19, 20, 21, 26, 27, 30, 33, 34, 35, 36, 40]`.
+- **Duvidosos** (pequenos/borrados, provável bola extra): `2/40` (5.0%). Índices: `[6, 37]`.
+- **Falsos positivos genuínos não-bola** (letras 'O'/'2' em placas, ícone de bola no placar de TV, cabeças): `7/40` (17.5%). Índices: `[8, 9, 17, 22, 32, 38, 39]`.
+- Quebra programática de TODOS os `742` FPs em `val.txt` (`conf >= 0.35`): `33` duplicados (`IoU >= 0.50`), `248` quase-acerto (`0.30 <= IoU < 0.50`), `37` sobreposição parcial (`0.10 <= IoU < 0.30`), e `424` distantes do GT (`IoU < 0.10`).
+- Notas da inspeção visual: 20/40 são a própria bola anotada com pequeno deslocamento em caixas minúsculas de 5–12 px (0,34<=IoU<0,50, dist<=4,4 px) e 2/40 (#07, #10) são caixas duplicadas sobre a mesma bola anotada (IoU>=0,55). 9/40 são bolas extras reais paradas no gol/linha lateral não anotadas (#02,#05,#11,#23,#24,#25,#28,#29,#31) e 2/40 (#06,#37) são prováveis bolas extras borradas. Apenas 7/40 (17,5%) são FPs genuínos não-bola: ícone de bola no placar de TV (#08), letras 'O'/'2' em placas (#09,#17,#22,#32) e cabeças de goleiro/árbitro (#38,#39).
+
+**Estimativa de métricas descontando bolas reais não anotadas** (estimativa conservadora baseada na amostra de 40 recortes, assumindo a mesma taxa entre FPs mantidos e removidos; **nenhum rótulo original foi alterado**):
+
+| Cenário (estimativa) | Precisão base | Recall base | F1 base | Precisão filtrada | Recall filtrado | F1 filtrado | ΔF1 estimado |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Taxa aplicada a todos os FPs (22.5%) | 0.8090 | 0.6963 | 0.7484 | 0.8323 | 0.6769 | 0.7466 | -0.0019 |
+| Taxa aplicada apenas aos FPs `conf>=0.50` (393/742) | 0.7827 | 0.6893 | 0.7330 | 0.8094 | 0.6735 | 0.7352 | +0.0022 |
+
+## Procedência e auditoria do `soccernet_gsr_test_virgin` (descartado como prova)
+
+- **Origem**: `/Users/j.henrique/soccer-four-ref-gsr25/archives/test.zip` (split `test` do SoccerNet Game State Reconstruction 2025, 49 clipes 1080p de transmissão).
+- **Montagem na Rodada 1**: `10 quadros igualmente espaçados por clipe em 49 clipes do split test do SoccerNet GSR 2025 (490 quadros, 456 anotações category_id=4 role=ball).`.
+- **Prova de 0 sobreposição com `r1`**: `0 correspondências de SHA-256 contra todas as 36.150 imagens listadas em r1/copy_receipt.json (e fora dos jogos de treino 4, 6, 9 do FewShot-R18).`.
+- **Confiabilidade das anotações de bola (auditoria visual)**: NÃO CONFIÁVEL — descartado como prova na Rodada 2. A auditoria visual de 20 caixas GT e 8 'FPs' do t1b_v5 no GSR mostrou que as anotações de bola do SoccerNet GSR (dataset voltado a jogadores/estado de jogo) ficam frequentemente deslocadas/atrasadas em bolas rápidas (inclusive caixas GT sobre grama vazia). Como consequência, 6–7 de 8 'FPs' inspecionados eram bolas reais detectadas corretamente pelo YOLO com IoU < 0,50 contra a caixa deslocada do GSR, corrompendo artificialmente precisão, F1 e AUC.
+- **`box2boxcam` (câmera amadora/noturna, 198 quadros)**: não disponível localmente; permanece não medido.
+
+## Rodada 1 (preservada como referência histórica)
+
+Arquivo completo preservado em `results/rodada1_experiment_results.json`. Na Rodada 1, o protocolo usou recorte justo `context_scale=1.0` (`48x96` letterbox), partição única 50/50 de `val.txt` (`val_calib` 1.624 imgs / 642 jogos, F1 base `0.6381`; `val_eval` 1.623 imgs / 151 jogos contendo `v14`, F1 base `0.7887`), mineração em 1.500 imagens de `train.txt` e 8 épocas × 180 episódios (1.440 episódios), com `12` configurações testadas:
+
+| Braço (Rodada 1, `val_eval`) | Config selecionada | Precisão | Recall | F1 | mAP50 | ROC-AUC | FPs rem | TPs rem | ΔF1 (IC 95% imgs) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Detector sozinho | baseline | 0.7960 | 0.7815 | 0.7887 | 0.7251 | 0.7786 (`conf`) | 0/329 | 0/1284 | 0.0000 |
+| FewShot-R18 jogadores (congelado) | `layer2_positive_only_k1` | 0.7984 | 0.7785 | 0.7883 | 0.7218 | 0.5125 | 6/329 | 5/1284 | -0.0004 [-0.0024, +0.0013] |
+| FewShot-R18-bola (treinado) | `trained_ball_layer4_pos_minus_neg_k6` | 0.8278 | 0.7139 | 0.7667 | 0.6685 | 0.6244 | 85/329 | 111/1284 | -0.0220 [-0.0309, -0.0129] |
 
 ## Limitações
 
-- O conjunto `val.txt` do `r5_9010` não é teste virgem do detector: foi usado durante o treino do `t1b_v5_etapa1_rodada1.pt` para selecionar o melhor checkpoint.
-- O filtro atua apenas em pós-processamento (remoção de FPs) e nunca aumenta recall nem recupera bolas não propostas pelo detector.
-- Bolas em quadros 1080p frequentemente medem ~10×10 pixels; o redimensionamento para 48×96 letterbox pode perder detalhes finos e depende fortemente da aparência local.
-- A mineração de negativos em `train.txt` sofre do viés de treino do detector (menos FPs de alta confiança do que fora do treino), exigindo mineração em confiança baixa (`0.05..0.35`).
-- O conjunto amador noturno `box2boxcam` (198 quadros) não estava disponível localmente para medição direta.
+- `val.txt` não é teste virgem do detector: foi usado para selecionar o checkpoint `t1b_v5_etapa1_rodada1.pt`. Os valores absolutos podem ser otimistas, embora a comparação entre os braços ocorra sob o mesmo viés.
+- O grupo `v14` concentra 1.111 das 3.247 imagens de `val.txt` (34,2%) sob um único `game_id`, aumentando a variância do bootstrap por jogo e criando uma dobra maior na CV de 5 dobras.
+- O filtro só remove detecções (nunca gera novas caixas nem aumenta recall); quando o detector já tem precisão próxima de 0,75–0,80, qualquer remoção imprecisa custa caro em F1.
+- Parte dos FPs registrados em `val.txt` corresponde a bolas reais não anotadas (auditado em `results/amostra_fp.png`), o que penaliza tanto o detector quanto qualquer filtro que acerte ao manter essas bolas.
+- A mineração completa em `train.txt` (32.852 imagens) usou `imgsz=1280` (resolução de treino do `t1b_v5`) por viabilidade computacional no Mac MPS, enquanto a avaliação oficial em `val.txt` manteve `imgsz=1920` (padrão do site).
+- Não havia conjunto virgem confiável de câmera amadora/noturna (`box2boxcam`, 198 quadros) disponível localmente; `soccernet_gsr_test_virgin` foi auditado visualmente e descartado por caixas GT de bola deslocadas.
