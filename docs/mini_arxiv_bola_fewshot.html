@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Detector de Bola + Filtro FewShot-R18 — Relatório Técnico</title>
+<style>
+  @page {
+    size: A4;
+    margin: 11mm 13mm 11mm 13mm;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    font-family: "Times New Roman", "Liberation Serif", Georgia, serif;
+    font-size: 8.6pt;
+    line-height: 1.24;
+    color: #000;
+    background: #fff;
+    margin: 0;
+    padding: 0;
+  }
+  header {
+    text-align: center;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #000;
+  }
+  .tag {
+    font-size: 8pt;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #333;
+    margin-bottom: 4px;
+  }
+  h1 {
+    font-size: 14.5pt;
+    font-weight: bold;
+    line-height: 1.2;
+    margin: 0 0 5px 0;
+  }
+  .meta {
+    font-size: 8.8pt;
+    color: #222;
+    margin: 0;
+  }
+  .abstract {
+    margin: 8px 18px 10px 18px;
+    padding: 6px 10px;
+    border-top: 0.75px solid #000;
+    border-bottom: 0.75px solid #000;
+    font-size: 8.8pt;
+    text-align: justify;
+  }
+  .abstract-title {
+    font-weight: bold;
+    text-transform: uppercase;
+    font-size: 8.2pt;
+    letter-spacing: 0.05em;
+    margin-bottom: 3px;
+    text-align: center;
+  }
+  h2 {
+    font-size: 10.5pt;
+    font-weight: bold;
+    margin: 10px 0 4px 0;
+    padding-bottom: 1px;
+    border-bottom: 0.5px solid #000;
+    page-break-after: avoid;
+  }
+  p {
+    margin: 3px 0 5px 0;
+    text-align: justify;
+  }
+  ul {
+    margin: 2px 0 6px 16px;
+    padding: 0;
+  }
+  li {
+    margin: 2px 0;
+    text-align: justify;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 4px 0 6px 0;
+    font-size: 7.8pt;
+    page-break-inside: avoid;
+  }
+  caption {
+    caption-side: top;
+    text-align: left;
+    font-size: 8.5pt;
+    margin-bottom: 3px;
+  }
+  thead th {
+    border-top: 1.2px solid #000;
+    border-bottom: 0.8px solid #000;
+    padding: 3px 4px;
+    font-weight: bold;
+    text-align: left;
+  }
+  tbody td {
+    padding: 2.2px 4px;
+    border-bottom: 0.3px solid #ddd;
+    vertical-align: top;
+  }
+  tbody tr:last-child td {
+    border-bottom: 1.2px solid #000;
+  }
+  th.n, td.n {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  tr.hl td {
+    font-weight: bold;
+    background: #f5f5f5;
+  }
+  .note {
+    font-size: 8pt;
+    color: #222;
+    margin-top: -3px;
+    margin-bottom: 6px;
+  }
+  code {
+    font-family: "Courier New", Courier, monospace;
+    font-size: 8pt;
+  }
+  .page-break {
+    page-break-before: always;
+  }
+  footer {
+    margin-top: 10px;
+    padding-top: 4px;
+    border-top: 0.5px solid #000;
+    font-size: 7.8pt;
+    color: #333;
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="tag">Nota Técnica de Pesquisa · Registro Experimental</div>
+  <h1>Filtragem de Falsos Positivos em Detecção de Bola com FewShot-R18:<br>Avaliação em Três Rodadas sobre o Dataset <code>r5_9010</code></h1>
+  <p class="meta">Repositório privado: <code>Hmenez3s/bola-fewshot</code> (commit <code>bab65f0</code>) · 26 de novembro de 2026</p>
+</header>
+
+<div class="abstract">
+  <div class="abstract-title">Resumo</div>
+  Avaliamos se o uso de um classificador métrico few-shot (FewShot-R18) como segundo estágio sobre as detecções de um detector YOLO de bola (<code>t1b_v5_etapa1_rodada1.pt</code>) melhora precisão, F1 e mAP50 em relação ao detector sozinho. O estudo foi conduzido em três rodadas progressivas com validação cruzada aninhada de 5 dobras por jogo sobre 3.247 imagens (793 jogos, 3.330 bolas anotadas, interseção zero de jogos com o treino). Na configuração mais fiel ao paradigma few-shot (Rodada 3: treino episódico intra-jogo e 6 auto-referências de alta confiança retiradas do próprio jogo sem gabarito), as auto-referências atingiram 87,5% de precisão em IoU&ge;0,50 (95,1% em IoU&ge;0,30) e o filtro elevou o F1 para 0,7381 no conjunto completo (+0,0226 sobre o padrão <code>conf=0,35</code>) e 0,7746 nos 24 jogos elegíveis. Contudo, o vencedor geral no conjunto completo foi um pós-processamento sem rede extra: reduzir a confiança do detector para <code>conf=0,15</code> mantendo apenas 1 bola por quadro (<code>top1_per_frame</code>), alcançando F1&nbsp;=&nbsp;0,7407 (+0,0252) e mAP50&nbsp;=&nbsp;0,6382 (+0,0350).
+</div>
+
+<h2>1. Pergunta e Escopo</h2>
+<p>
+  Dado o detector de bola <code>t1b_v5_etapa1_rodada1.pt</code> (Ultralytics YOLO, 1 classe, <code>imgsz=1920</code>, ponto padrão de produção <code>conf=0,35</code>, <code>nms_iou=0,70</code>), a hipótese investigada é se um segundo estágio baseado no FewShot-R18 — aplicado exclusivamente para descartar falsos positivos (FPs) sobre os recortes detectados — produz ganho estatisticamente distinguível de zero em F1 e mAP50 sem perda inaceitável de recall.
+</p>
+
+<h2>2. Metodologia</h2>
+<ul>
+  <li><strong>Dados e separação por jogo:</strong> dataset <code>item488_t1b_v5_dataset_r5_9010</code> (imagens em <code>r1</code>), com 32.852 imagens de treino (488 jogos) e 3.247 imagens de validação (793 jogos, 3.330 bolas GT), com <code>train &cap; val = 0</code> jogos. As 51 imagens sem bola após limpeza de rótulos permanecem excluídas conforme o manifesto oficial.</li>
+  <li><strong>Arquitetura e treino episódico (receita FewShot-R18):</strong> ResNet-18 pré-treinada no ImageNet (<code>fc=Identity</code>, apenas <code>layer3</code> e <code>layer4</code> treináveis, <code>BatchNorm2d</code> em <code>eval</code>), logits por similaridade de cosseno escalada (&times;20) contra protótipos médios do suporte, entropia cruzada, <code>AdamW(lr=2e-4, wd=1e-4)</code> e <code>CosineAnnealingLR</code> em 16 épocas &times; 360 episódios (5.760 episódios, semente 25). Na Rodada 3, cada episódio utiliza suporte e consultas do <em>mesmo jogo</em> (13.538 imagens cobrindo os 488 jogos de <code>train.txt</code>) com recortes quadrados <code>96&times;96</code> e margem de contexto 2&times;/3&times;.</li>
+  <li><strong>Auto-referências por jogo (sem gabarito):</strong> na avaliação da Rodada 3, cada jogo seleciona automaticamente até 6 detecções do YOLO com <code>conf &ge; 0,60</code> em quadros distintos e espaçados uniformemente ao longo do jogo. Os 144 quadros de referência são excluídos da avaliação de consulta. Apenas 24 dos 793 jogos (3,0% dos jogos; 2.181/3.247 imagens = 67,2%) possuem quadros suficientes; os demais 769 jogos (735 com apenas 1 imagem) usam fallback explícito (manter detector ou protótipo global do treino).</li>
+  <li><strong>Protocolo de avaliação e significância:</strong> validação cruzada aninhada de 5 dobras por jogo sobre todo o <code>val.txt</code>. Todos os limiares, escalas de contexto e pesos de fusão logística (<code>conf_yolo</code> + score FewShot) são calibrados estritamente nas 4 dobras de calibração e congelados antes da medição na dobra de teste. Intervalos de confiança (IC 95%) de &Delta;F1 são calculados por bootstrap pareado por jogo (2.000 reamostragens).</li>
+</ul>
+
+<h2>3. Evolução entre Rodadas e Resultados Principais</h2>
+
+<table>
+  <caption><strong>Tabela 1.</strong> Evolução do experimento da Rodada 1 à Rodada 3 (comparação contra o detector padrão <code>conf=0,35</code>).</caption>
+  <thead>
+    <tr>
+      <th>Rodada</th>
+      <th>Desenho principal</th>
+      <th class="n">Recorte</th>
+      <th class="n">Melhor F1 (FewShot)</th>
+      <th class="n">&Delta;F1 vs base 0,35</th>
+      <th class="n">Configs</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Rodada 1</td>
+      <td>6 refs globais, split 50/50 do val, treino parcial (1.500 imgs)</td>
+      <td class="n">1&times; (48&times;96)</td>
+      <td class="n">0,7667 (base 0,7887)</td>
+      <td class="n">&minus;0,0220</td>
+      <td class="n">12</td>
+    </tr>
+    <tr>
+      <td>Rodada 2</td>
+      <td>6 refs globais, CV 5 dobras por jogo, treino completo (32.852 imgs)</td>
+      <td class="n">2&times; (96&times;96)</td>
+      <td class="n">0,7221 (base 0,7155)</td>
+      <td class="n">+0,0066</td>
+      <td class="n">36+3</td>
+    </tr>
+    <tr class="hl">
+      <td>Rodada 3</td>
+      <td>6 auto-refs por jogo, treino intra-jogo, <code>conf=0,15</code> + fusão + <code>top1</code></td>
+      <td class="n">2&times;/3&times; (96&times;96)</td>
+      <td class="n">0,7381 (base 0,7155)</td>
+      <td class="n">+0,0226</td>
+      <td class="n">120</td>
+    </tr>
+  </tbody>
+</table>
+
+<table>
+  <caption><strong>Tabela 2.</strong> Resultados OOF no conjunto completo <code>val.txt</code> (3.247 imagens, 793 jogos, 3.330 bolas GT) — Rodada 3.</caption>
+  <thead>
+    <tr>
+      <th>Ponto / Método</th>
+      <th>Categoria</th>
+      <th class="n">Precisão</th>
+      <th class="n">Recall</th>
+      <th class="n">F1</th>
+      <th class="n">mAP50</th>
+      <th class="n">FPs rem.</th>
+      <th class="n">TPs rem.</th>
+      <th class="n">&Delta;F1 vs 0,35</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>conf=0,35</code> · Detector sozinho (<code>iou=0,70</code>)</td>
+      <td>Baseline padrão</td>
+      <td class="n">0,7535</td>
+      <td class="n">0,6811</td>
+      <td class="n">0,7155</td>
+      <td class="n">0,6032</td>
+      <td class="n">0 / 742</td>
+      <td class="n">0 / 2.268</td>
+      <td class="n">0,0000</td>
+    </tr>
+    <tr>
+      <td><code>conf=0,35</code> · <code>nms_040</code></td>
+      <td>Sem rede</td>
+      <td class="n">0,7670</td>
+      <td class="n">0,6811</td>
+      <td class="n">0,7215</td>
+      <td class="n">0,6060</td>
+      <td class="n">53 / 742</td>
+      <td class="n">0 / 2.268</td>
+      <td class="n">+0,0060</td>
+    </tr>
+    <tr>
+      <td><code>conf=0,35</code> · <code>top1_per_frame</code></td>
+      <td>Sem rede</td>
+      <td class="n">0,8182</td>
+      <td class="n">0,6610</td>
+      <td class="n">0,7312</td>
+      <td class="n">0,5987</td>
+      <td class="n">253 / 742</td>
+      <td class="n">67 / 2.268</td>
+      <td class="n">+0,0158</td>
+    </tr>
+    <tr>
+      <td><code>conf=0,35</code> · FewShot por jogo + fusão + <code>top1</code></td>
+      <td>FewShot-R18</td>
+      <td class="n">0,8377</td>
+      <td class="n">0,6447</td>
+      <td class="n">0,7287</td>
+      <td class="n">0,5872</td>
+      <td class="n">326 / 742</td>
+      <td class="n">121 / 2.268</td>
+      <td class="n">+0,0132</td>
+    </tr>
+    <tr>
+      <td><code>conf=0,15</code> · Detector sozinho (<code>iou=0,70</code>)</td>
+      <td>Baseline 0,15</td>
+      <td class="n">0,5343</td>
+      <td class="n">0,7757</td>
+      <td class="n">0,6328</td>
+      <td class="n">0,6654</td>
+      <td class="n">0 / 2.251</td>
+      <td class="n">0 / 2.583</td>
+      <td class="n">&minus;0,0827</td>
+    </tr>
+    <tr>
+      <td><code>conf=0,15</code> · <code>nms_040</code></td>
+      <td>Sem rede</td>
+      <td class="n">0,6431</td>
+      <td class="n">0,7532</td>
+      <td class="n">0,6938</td>
+      <td class="n">0,6578</td>
+      <td class="n">859 / 2.251</td>
+      <td class="n">75 / 2.583</td>
+      <td class="n">&minus;0,0217</td>
+    </tr>
+    <tr class="hl">
+      <td><code>conf=0,15</code> · <code>top1_per_frame</code></td>
+      <td>Sem rede (vencedor)</td>
+      <td class="n">0,7739</td>
+      <td class="n">0,7102</td>
+      <td class="n">0,7407</td>
+      <td class="n">0,6382</td>
+      <td class="n">1.560 / 2.251</td>
+      <td class="n">218 / 2.583</td>
+      <td class="n">+0,0252</td>
+    </tr>
+    <tr>
+      <td><code>conf=0,15</code> · FewShot por jogo + fusão logística</td>
+      <td>FewShot-R18</td>
+      <td class="n">0,7496</td>
+      <td class="n">0,6913</td>
+      <td class="n">0,7193</td>
+      <td class="n">0,6122</td>
+      <td class="n">1.482 / 2.251</td>
+      <td class="n">281 / 2.583</td>
+      <td class="n">+0,0038</td>
+    </tr>
+    <tr>
+      <td><code>conf=0,15</code> · FewShot por jogo + fusão + <code>top1</code></td>
+      <td>FewShot-R18</td>
+      <td class="n">0,8238</td>
+      <td class="n">0,6685</td>
+      <td class="n">0,7381</td>
+      <td class="n">0,6056</td>
+      <td class="n">1.775 / 2.251</td>
+      <td class="n">357 / 2.583</td>
+      <td class="n">+0,0226</td>
+    </tr>
+    <tr>
+      <td><code>conf=0,10</code> · <code>top1_per_frame</code></td>
+      <td>Sem rede</td>
+      <td class="n">0,7632</td>
+      <td class="n">0,7171</td>
+      <td class="n">0,7394</td>
+      <td class="n">0,6435</td>
+      <td class="n">2.890 / 3.631</td>
+      <td class="n">337 / 2.725</td>
+      <td class="n">+0,0240</td>
+    </tr>
+    <tr>
+      <td><code>conf=0,10</code> · FewShot por jogo + fusão + <code>top1</code></td>
+      <td>FewShot-R18</td>
+      <td class="n">0,8236</td>
+      <td class="n">0,6673</td>
+      <td class="n">0,7372</td>
+      <td class="n">0,6042</td>
+      <td class="n">3.155 / 3.631</td>
+      <td class="n">503 / 2.725</td>
+      <td class="n">+0,0218</td>
+    </tr>
+  </tbody>
+</table>
+<p class="note">Nota: em <code>conf=0,15</code>, o ganho sobre a base de <code>conf=0,15</code> foi +0,1079 (IC 95% jogos [+0,0916, +0,1182]) para <code>top1_per_frame</code> e +0,1053 (IC [+0,0771, +0,1173]) para FewShot + fusão + <code>top1</code>. Em <code>conf=0,35</code>, <code>nms_040</code> obteve IC [+0,0036, +0,0105] removendo 53 FPs sem perder nenhum TP.</p>
+
+<table>
+  <caption><strong>Tabela 3.</strong> Subconjunto elegível de jogos com 6 auto-referências (24 jogos, 2.037 quadros de consulta; 144 quadros de referência excluídos) em <code>conf=0,15</code>.</caption>
+  <thead>
+    <tr>
+      <th>Método (<code>conf=0,15</code>)</th>
+      <th class="n">ROC-AUC</th>
+      <th class="n">Precisão</th>
+      <th class="n">Recall</th>
+      <th class="n">F1</th>
+      <th class="n">mAP50</th>
+      <th class="n">FPs rem.</th>
+      <th class="n">TPs rem.</th>
+      <th class="n">&Delta;F1 (IC 95% jogos)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Detector sozinho (<code>conf=0,15</code>)</td>
+      <td class="n">0,8651 (<code>conf</code>)</td>
+      <td class="n">0,5602</td>
+      <td class="n">0,8147</td>
+      <td class="n">0,6639</td>
+      <td class="n">0,7177</td>
+      <td class="n">0 / 1.301</td>
+      <td class="n">0 / 1.657</td>
+      <td class="n">0,0000</td>
+    </tr>
+    <tr>
+      <td><code>nms_040</code> (sem rede)</td>
+      <td class="n">&mdash;</td>
+      <td class="n">0,6800</td>
+      <td class="n">0,7876</td>
+      <td class="n">0,7298</td>
+      <td class="n">0,7042</td>
+      <td class="n">547 / 1.301</td>
+      <td class="n">55 / 1.657</td>
+      <td class="n">+0,0660 [+0,0450, +0,0743]</td>
+    </tr>
+    <tr>
+      <td><code>top1_per_frame</code> (sem rede)</td>
+      <td class="n">&mdash;</td>
+      <td class="n">0,7855</td>
+      <td class="n">0,7542</td>
+      <td class="n">0,7695</td>
+      <td class="n">0,6894</td>
+      <td class="n">882 / 1.301</td>
+      <td class="n">123 / 1.657</td>
+      <td class="n">+0,1056 [+0,0789, +0,1147]</td>
+    </tr>
+    <tr>
+      <td><code>frozen_per_game_cut</code> (jogadores congelado)</td>
+      <td class="n">0,6720</td>
+      <td class="n">0,6110</td>
+      <td class="n">0,7724</td>
+      <td class="n">0,6823</td>
+      <td class="n">0,6911</td>
+      <td class="n">301 / 1.301</td>
+      <td class="n">86 / 1.657</td>
+      <td class="n">+0,0184 [&minus;0,0011, +0,0255]</td>
+    </tr>
+    <tr>
+      <td>FewShot por jogo (corte seco, <code>pos&minus;neg_global</code>)</td>
+      <td class="n">0,7501</td>
+      <td class="n">&mdash;</td>
+      <td class="n">&mdash;</td>
+      <td class="n">0,6885</td>
+      <td class="n">&mdash;</td>
+      <td class="n">478 / 1.301</td>
+      <td class="n">157 / 1.657</td>
+      <td class="n">+0,0247 [+0,0070, +0,0627]</td>
+    </tr>
+    <tr>
+      <td>FewShot por jogo + fusão logística</td>
+      <td class="n">0,8565</td>
+      <td class="n">0,7645</td>
+      <td class="n">0,7468</td>
+      <td class="n">0,7555</td>
+      <td class="n">0,6738</td>
+      <td class="n">833 / 1.301</td>
+      <td class="n">138 / 1.657</td>
+      <td class="n">+0,0917 [+0,0664, +0,0997]</td>
+    </tr>
+    <tr class="hl">
+      <td>FewShot por jogo + fusão + <code>top1</code></td>
+      <td class="n">0,8565</td>
+      <td class="n">0,8318</td>
+      <td class="n">0,7247</td>
+      <td class="n">0,7746</td>
+      <td class="n">0,6663</td>
+      <td class="n">1.003 / 1.301</td>
+      <td class="n">183 / 1.657</td>
+      <td class="n">+0,1107 [+0,0718, +0,1200]</td>
+    </tr>
+  </tbody>
+</table>
+<p class="note">Comparação de modos de protótipo por jogo (corte seco em <code>conf=0,15</code>, elegível): <code>positive_only</code> AUC=0,7189 / F1=0,6853; <code>pos_minus_neg_same_game</code> AUC=0,7450 / F1=0,6932; <code>pos_minus_neg_global</code> AUC=0,7501 / F1=0,6885.</p>
+
+<h2>4. Auditoria de Falsos Positivos e Limitações</h2>
+<ul>
+  <li><strong>Natureza dos falsos positivos no <code>val.txt</code>:</strong> dos 742 FPs em <code>conf=0,35</code>, 281 (37,9%) têm sobreposição substancial com a bola real (33 duplicatas com IoU&ge;0,50 e 248 quase-acertos com IoU entre 0,30 e 0,50), 37 têm IoU entre 0,10 e 0,30, e 424 (57,1%) são distantes (IoU&lt;0,10). Na auditoria visual de 40 FPs de alta confiança (<code>conf&ge;0,50</code>, arquivo <code>results/amostra_fp.png</code>), 22/40 (55,0%) são quase-acertos/duplicatas da própria bola anotada, 9/40 (22,5%, +2 duvidosos) são bolas reais não anotadas no dataset e apenas 7/40 (17,5%) são falsos positivos genuínos não-bola (letras em placas, ícone de placar, cabeças). Como um classificador de aparência vê a própria bola dentro de duplicatas e quase-acertos, o teto real para filtragem visual é reduzido.</li>
+  <li><strong>Viés de validação do detector:</strong> o conjunto <code>val.txt</code> foi usado durante o treino do <code>t1b_v5_etapa1_rodada1.pt</code> para escolher o melhor checkpoint. A comparação entre os braços ocorre sob o mesmo viés e é justa entre si, mas os valores absolutos podem estar otimistas.</li>
+  <li><strong>Ausência de conjunto virgem confiável:</strong> o conjunto auxiliar <code>soccernet_gsr_test_virgin</code> (490 imagens) foi auditado visualmente e descartado como prova devido a caixas GT deslocadas. O conjunto amador de celular (<code>box2boxcam</code>, 198 quadros, onde o detector v5 tem mAP50&nbsp;=&nbsp;0,08) não estava acessível localmente e permanece não medido.</li>
+  <li><strong>Multiplicidade de testes:</strong> foram avaliadas 12 configurações na Rodada 1, 36+3 na Rodada 2 e 120 na Rodada 3.</li>
+</ul>
+
+<h2>5. Conclusão</h2>
+<ol style="margin: 2px 0 6px 18px; padding: 0;">
+  <li style="margin: 2px 0; text-align: justify;"><strong>A seleção automática de 6 referências por jogo funciona:</strong> escolher até 6 detecções com <code>conf &ge; 0,60</code> em quadros dispersos do próprio jogo (sem gabarito) alcança 95,1% de precisão em IoU&ge;0,30 e permite ao FewShot-R18 treinado intra-jogo atingir ROC-AUC de 0,7501 nos 24 jogos elegíveis.</li>
+  <li style="margin: 2px 0; text-align: justify;"><strong>No dataset <code>r5_9010</code>, o FewShot-R18 não supera pós-processamento simples em F1 geral nem em mAP50:</strong> baixar a confiança do YOLO para <code>conf=0,15</code> e manter no máximo 1 bola por quadro (<code>top1_per_frame</code>) entrega <strong>F1&nbsp;=&nbsp;0,7407 (+0,0252)</strong> e <strong>mAP50&nbsp;=&nbsp;0,6382 (+0,0350)</strong> sem custo de uma segunda rede neural.</li>
+  <li style="margin: 2px 0; text-align: justify;"><strong>Troca precisão vs. recall nos jogos longos:</strong> nos 24 jogos elegíveis em <code>conf=0,15</code>, combinar FewShot por jogo + <code>conf</code> + <code>top1</code> eleva a precisão de 0,7855 para 0,8318 (F1 0,7746 vs. 0,7695), ao custo de &minus;2,95 pp em recall e &minus;2,31 pp em mAP50.</li>
+  <li style="margin: 2px 0; text-align: justify;"><strong>Próximo passo racional:</strong> adotar a avaliação de <code>conf=0,15 + top1_per_frame</code> (e <code>nms_iou=0,40</code>) como ganho imediato sem rede adicional, e reservar o FewShot-R18 por jogo para teste em vídeos amadores/fora de distribuição (<code>box2boxcam</code>), onde a taxa de falsos positivos reais não-bola é substancialmente maior.</li>
+</ol>
+
+<footer>
+  <span>Código e dados de saída: <code>Hmenez3s/bola-fewshot</code> (<code>RELATORIO.md</code>, <code>results/rodada{1,2,3}_experiment_results.json</code>)</span>
+  <span>24/24 testes unitários passando · Apple Silicon MPS</span>
+</footer>
+
+</body>
+</html>
