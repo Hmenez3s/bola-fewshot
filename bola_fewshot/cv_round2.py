@@ -22,6 +22,7 @@ from bola_fewshot.dataset import (
 from bola_fewshot.detector import BallDetectorProtocol, Detection, YoloBallDetector
 from bola_fewshot.fewshot_filter import FewShotR18Encoder, PrototypeFilter, calibrate_threshold
 from bola_fewshot.metrics import (
+    box_iou_matrix,
     compute_filter_cost,
     compute_pr_auc,
     compute_roc_auc,
@@ -117,28 +118,36 @@ def _extract_val_crops_by_context(
     *,
     context_scales: Sequence[float],
     eval_iou: float,
-) -> tuple[list[Detection], np.ndarray, dict[float, list[Image.Image]]]:
+) -> tuple[list[Detection], np.ndarray, np.ndarray, dict[float, list[Image.Image]]]:
     flat_dets: list[Detection] = []
     flat_is_tp: list[bool] = []
+    flat_max_gt_iou: list[float] = []
     crops_by_ctx: dict[float, list[Image.Image]] = {ctx: [] for ctx in context_scales}
     for record in val_split.records:
         dets = list(dets_by_image.get(record.image_id, ()))
         if not dets:
             continue
+        boxes = [d.box for d in dets]
         matched = match_image_detections(
-            [d.box for d in dets],
+            boxes,
             [d.conf for d in dets],
             record.gt_boxes,
             iou_threshold=eval_iou,
         )
+        if record.gt_boxes:
+            ious = box_iou_matrix(np.asarray(boxes, dtype=np.float64), np.asarray(record.gt_boxes, dtype=np.float64))
+            max_ious = ious.max(axis=1).tolist()
+        else:
+            max_ious = [0.0] * len(dets)
         flat_dets.extend(dets)
         flat_is_tp.extend(matched.tolist())
+        flat_max_gt_iou.extend(max_ious)
         with Image.open(record.image_path) as img:
             rgb = img.convert("RGB")
             for det in dets:
                 for ctx in context_scales:
                     crops_by_ctx[ctx].append(crop_box(rgb, det.box, context_scale=ctx, square=True))
-    return flat_dets, np.asarray(flat_is_tp, dtype=bool), crops_by_ctx
+    return flat_dets, np.asarray(flat_is_tp, dtype=bool), np.asarray(flat_max_gt_iou, dtype=np.float64), crops_by_ctx
 
 
 def _sample_train_pos_refs_by_context(
@@ -181,10 +190,15 @@ def _sample_train_neg_refs_by_context(
             if not line.strip():
                 continue
             row = json.loads(line)
+            gt_boxes = [tuple(float(v) for v in b) for b in row["gt_boxes"]]
+            gt_arr = np.asarray(gt_boxes, dtype=np.float64).reshape(len(gt_boxes), 4) if gt_boxes else np.empty((0, 4))
             for d in row["dets"]:
                 if not d["is_tp"]:
+                    box = tuple(float(v) for v in d["box"])
+                    if len(gt_arr) > 0 and float(box_iou_matrix(np.asarray([box], dtype=np.float64), gt_arr).max()) > 0.0:
+                        continue
                     conf = float(d["conf"])
-                    entry = (str(row["image_id"]), str(row["image_path"]), tuple(float(v) for v in d["box"]), conf)
+                    entry = (str(row["image_id"]), str(row["image_path"]), box, conf)
                     if conf >= eval_conf:
                         high_fps.append(entry)
                     elif conf >= mining_conf:
@@ -539,16 +553,26 @@ def run_round2_cv(
         iou_threshold=config.eval_iou,
     )
 
-    flat_dets, flat_is_tp, val_crops_by_ctx = _extract_val_crops_by_context(
+    flat_dets, flat_is_tp, flat_max_gt_iou, val_crops_by_ctx = _extract_val_crops_by_context(
         val_split,
         val_dets,
         context_scales=config.context_scales,
         eval_iou=config.eval_iou,
     )
+    far_fp_mask = flat_is_tp | ((~flat_is_tp) & (flat_max_gt_iou < 0.10))
     det_fold_idx = np.array([fold_by_image[d.image_id] for d in flat_dets], dtype=np.int64)
+    det_confs = np.asarray([d.conf for d in flat_dets], dtype=np.float64)
     detector_conf_sep = {
-        "roc_auc": compute_roc_auc([d.conf for d in flat_dets], flat_is_tp),
-        "pr_auc": compute_pr_auc([d.conf for d in flat_dets], flat_is_tp),
+        "roc_auc": compute_roc_auc(det_confs, flat_is_tp),
+        "pr_auc": compute_pr_auc(det_confs, flat_is_tp),
+        "far_fp_roc_auc": compute_roc_auc(det_confs[far_fp_mask], flat_is_tp[far_fp_mask]),
+    }
+    fp_overlap_breakdown = {
+        "total_fp": int((~flat_is_tp).sum()),
+        "duplicate_iou_ge_050": int(((~flat_is_tp) & (flat_max_gt_iou >= 0.50)).sum()),
+        "near_match_030_to_050": int(((~flat_is_tp) & (flat_max_gt_iou >= 0.30) & (flat_max_gt_iou < 0.50)).sum()),
+        "near_match_010_to_030": int(((~flat_is_tp) & (flat_max_gt_iou >= 0.10) & (flat_max_gt_iou < 0.30)).sum()),
+        "far_iou_lt_010": int(((~flat_is_tp) & (flat_max_gt_iou < 0.10)).sum()),
     }
 
     mine_det = mining_detector or YoloBallDetector(
@@ -691,7 +715,7 @@ def run_round2_cv(
     nested_arm_results: dict[str, dict] = {}
     nested_per_image: dict[str, dict[str, dict[str, int]]] = {}
     for arm_name, cand_map in arm_candidates.items():
-        summary, per_img, _ = _evaluate_nested_arm_cv(
+        summary, per_img, oof_kept = _evaluate_nested_arm_cv(
             arm_name=arm_name,
             val_split=val_split,
             folds=folds,
@@ -705,6 +729,10 @@ def run_round2_cv(
             seed=config.seed,
             group_by=group_map,
         )
+        far_fp_removed = int(((~oof_kept) & (~flat_is_tp) & (flat_max_gt_iou < 0.10)).sum())
+        near_fp_removed = int(((~oof_kept) & (~flat_is_tp) & (flat_max_gt_iou >= 0.10)).sum())
+        summary["pooled_oof_cost"]["far_fps_removed"] = far_fp_removed
+        summary["pooled_oof_cost"]["near_or_dup_fps_removed"] = near_fp_removed
         nested_arm_results[arm_name] = summary
         nested_per_image[arm_name] = per_img
 
@@ -787,6 +815,7 @@ def run_round2_cv(
             "neg_refs_sampled": len(neg_ref_meta),
         },
         "baseline_val_all": _strip_per_image(val_base_metrics),
+        "fp_overlap_breakdown": fp_overlap_breakdown,
         "detector_conf_separability": detector_conf_sep,
         "training_runs": training_runs,
         "nested_arms": nested_arm_results,

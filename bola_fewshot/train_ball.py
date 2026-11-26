@@ -666,6 +666,7 @@ def build_pool_from_mined_jsonl(
     tp_high = 0
     fp_high = 0
     tp_low = 0
+    neg_excluded_gt_overlap = 0
 
     with jsonl_path.open("r", encoding="utf-8") as fh:
         for line in fh:
@@ -676,6 +677,7 @@ def build_pool_from_mined_jsonl(
             iid = str(row["image_id"])
             ipath = str(row["image_path"])
             gt_boxes = [tuple(float(v) for v in b) for b in row["gt_boxes"]]
+            gt_arr = np.asarray(gt_boxes, dtype=np.float64).reshape(len(gt_boxes), 4) if gt_boxes else np.empty((0, 4))
             gt_total += len(gt_boxes)
             img_pos: list[tuple[float, float, float, float]] = []
             for d in row["dets"]:
@@ -690,6 +692,10 @@ def build_pool_from_mined_jsonl(
                 else:
                     if conf >= eval_conf:
                         fp_high += 1
+                    if len(gt_arr) > 0 and float(box_iou_matrix(np.asarray([box], dtype=np.float64), gt_arr).max()) > 0.0:
+                        neg_excluded_gt_overlap += 1
+                        continue
+                    if conf >= eval_conf:
                         neg_high_specs.append((iid, ipath, box))
                     elif conf >= mining_conf:
                         neg_low_specs.append((iid, ipath, box))
@@ -749,6 +755,7 @@ def build_pool_from_mined_jsonl(
         ),
         "train_fp_high_conf_mined": len(neg_high_specs),
         "train_fp_low_conf_mined": len(neg_low_specs),
+        "neg_excluded_gt_overlap": neg_excluded_gt_overlap,
         "train_tp_low_conf": tp_low,
         "background_supplement_crops": 0,
         "pool_pos_crops": int(len(pos_arrays)),
