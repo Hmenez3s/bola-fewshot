@@ -44,6 +44,7 @@ def _dir_short(direction: str) -> str:
 def _arm_label(arm: str) -> str:
     return {
         "frozen_players": "FewShot-R18 jogadores (congelado)",
+        "trained_ball": "FewShot-R18-bola (treinado)",
         "trained_ball_layer34": "FewShot-R18-bola (treinado layer3/4)",
         "trained_ball_all_layers": "FewShot-R18-bola (treinado todas camadas)",
     }.get(arm, arm)
@@ -100,16 +101,31 @@ def render_combined_report(
         am = arm_all["pooled_oof_metrics"]
         all_layers_part = f" | Treinado todas camadas P={_fmt(am['precision'])}/R={_fmt(am['recall'])}/F1={_fmt(am['f1'])}/mAP50={_fmt(am['map50'])}"
 
+    l34_fold_aucs = [fl["fold_roc_auc"] for fl in arm_l34["folds"] if fl.get("fold_roc_auc") is not None]
+    l34_mean_auc = sum(l34_fold_aucs) / len(l34_fold_aucs) if l34_fold_aucs else arm_l34["pooled_oof_roc_auc"]
+    frz_fold_aucs = [fl["fold_roc_auc"] for fl in arm_frz["folds"] if fl.get("fold_roc_auc") is not None]
+    frz_mean_auc = sum(frz_fold_aucs) / len(frz_fold_aucs) if frz_fold_aucs else arm_frz["pooled_oof_roc_auc"]
+    best_fixed_l34_auc = max(
+        (c["pooled_oof_roc_auc"] for c in round2["fixed_configs"] if c["arm"] == "trained_ball_layer34" and c["pooled_oof_roc_auc"] is not None),
+        default=l34_mean_auc,
+    )
+    all_fold_aucs = (
+        [fl["fold_roc_auc"] for fl in arm_all["folds"] if fl.get("fold_roc_auc") is not None]
+        if arm_all is not None
+        else []
+    )
+    all_mean_auc = sum(all_fold_aucs) / len(all_fold_aucs) if all_fold_aucs else None
+
     summary_lines = [
         f"1. Veredito (Rodada 1 vs Rodada 2): {change_verdict}",
-        f"2. Correções aplicadas na Rodada 2: recorte quadrado `{p2['canvas_wh'][0]}x{p2['canvas_wh'][1]}` com `context_scale` ∈ `{p2['context_scales']}` escolhido só na calibração, CV aninhada de {p2['n_folds']} dobras por jogo sobre todo o `val.txt` ({s2['val_images']} imagens, {s2['train_val_group_audit']['groups_b']} jogos; `train∩val=0`), mineração em {m_stats['train_images_scanned']} imagens de `train.txt` e {p2['train_total_episodes']} episódios.",
+        f"2. Correções aplicadas na Rodada 2: recorte quadrado `{p2['canvas_wh'][0]}x{p2['canvas_wh'][1]}` com `context_scale` ∈ `{p2['context_scales']}` escolhido só na calibração (`2×` escolhido em 4/5 dobras, `3×` em 1/5), CV aninhada de {p2['n_folds']} dobras por jogo sobre todo o `val.txt` ({s2['val_images']} imagens, {s2['train_val_group_audit']['groups_b']} jogos; `train∩val=0`), mineração em todo o `train.txt` ({m_stats['train_images_scanned']} imagens) e {p2['train_total_episodes']} episódios.",
         f"3. Métricas OOF na Rodada 2 (todo `val.txt`, imgsz={p2['imgsz']}, conf={p2['conf']}): Base P={_fmt(base2['precision'])}/R={_fmt(base2['recall'])}/F1={_fmt(base2['f1'])}/mAP50={_fmt(base2['map50'])} | Congelado P={_fmt(frz_m['precision'])}/R={_fmt(frz_m['recall'])}/F1={_fmt(frz_m['f1'])}/mAP50={_fmt(frz_m['map50'])} | Treinado layer3/4 P={_fmt(l34_m['precision'])}/R={_fmt(l34_m['recall'])}/F1={_fmt(l34_m['f1'])}/mAP50={_fmt(l34_m['map50'])}{all_layers_part}.",
-        f"4. Custo real ({_arm_label(best_trained['arm'])}): removeu {bt_c['fps_removed']}/{bt_c['base_fp']} FPs ({_fmt(bt_c['fp_removal_rate']*100, 1)}%) e removeu {bt_c['tps_removed']}/{bt_c['base_tp']} bolas verdadeiras por engano (ΔRecall={_fmt_signed(bt_m['recall'] - base2['recall'])}).",
-        f"5. Bootstrap pareado ({p2['bootstrap_resamples']} reamostragens) para `{best_trained['arm']}` vs Base: jogos (n={best_trained['bootstrap_group']['n_groups']}) ΔF1={_fmt_signed(bt_bg['point_estimate'])} IC 95% [{_fmt_signed(bt_bg['ci_95_low'])}, {_fmt_signed(bt_bg['ci_95_high'])}] ({_dir_short(bt_bg['direction'])}); imagens (n={s2['val_images']}) IC 95% [{_fmt_signed(bt_bi['ci_95_low'])}, {_fmt_signed(bt_bi['ci_95_high'])}]; média das 5 dobras={_fmt_signed(best_trained['mean_fold_delta_f1'])}±{_fmt(best_trained['sd_fold_delta_f1'])}.",
-        f"6. Separabilidade OOF bola vs FP (ROC-AUC): `conf` do detector YOLO={_fmt(det_sep2['roc_auc'])}; jogadores congelado={_fmt(arm_frz['pooled_oof_roc_auc'])}; bola treinado layer3/4={_fmt(arm_l34['pooled_oof_roc_auc'])}"
-        + (f"; bola treinado todas camadas={_fmt(arm_all['pooled_oof_roc_auc'])}." if arm_all is not None else "."),
-        f"7. Rótulo ruidoso (`results/amostra_fp.png`, {fp_est['n_audited']} FPs em conf>=0.50): {fp_est['n_unannotated_real_balls']}/{fp_est['n_audited']} ({_fmt(fp_est['unannotated_ball_rate_strict']*100, 1)}%, IC Wilson [{_fmt(fp_est['unannotated_ball_rate_wilson_95'][0]*100, 1)}%, {_fmt(fp_est['unannotated_ball_rate_wilson_95'][1]*100, 1)}%]) são bolas reais não anotadas (+{fp_est['n_ambiguous']} duvidosos); descontando essa estimativa, F1 base={_fmt(fp_strict['baseline']['f1_adjusted'])} vs filtrado={_fmt(fp_strict['filtered']['f1_adjusted'])} (ΔF1 estimado={_fmt_signed(fp_strict['delta_f1_adjusted'])}). `soccernet_gsr_test_virgin` foi descartado como prova (anotações GT de bola deslocadas/atrasadas).",
-        f"8. Viés e teto de ganho: `val.txt` não é teste virgem do detector (usado na escolha do checkpoint; comparação relativa justa, absolutos possivelmente otimistas); FP/img `train`={m_stats['train_fp_per_image_at_eval_conf']:.4f} vs `val`={base2['fp_per_image']:.4f}; headroom base em `val`=+0.0000→{_fmt_signed(base2['headroom']['precision_headroom'])} em precisão e {_fmt_signed(base2['headroom']['f1_headroom'])} em F1; configurações testadas: Rodada 1={round1['protocol']['total_configs_tested']}, Rodada 2={p2['total_fixed_configs_tested']} fixas + {p2['total_nested_arm_selectors']} seletores CV aninhados.",
+        f"4. Custo real ({_arm_label(best_trained['arm'])}): removeu {bt_c['fps_removed']}/{bt_c['base_fp']} FPs ({_fmt(bt_c['fp_removal_rate']*100, 1)}%; sendo {bt_c.get('far_fps_removed', '?')} FPs distantes `IoU<0.10`) e removeu {bt_c['tps_removed']}/{bt_c['base_tp']} bolas verdadeiras por engano (ΔRecall={_fmt_signed(bt_m['recall'] - base2['recall'])}).",
+        f"5. Bootstrap pareado ({p2['bootstrap_resamples']} reamostragens) para `{best_trained['arm']}` vs Base: jogos (n={best_trained['bootstrap_group']['n_groups']}) ΔF1={_fmt_signed(bt_bg['point_estimate'])} IC 95% [{_fmt_signed(bt_bg['ci_95_low'])}, {_fmt_signed(bt_bg['ci_95_high'])}] ({_dir_short(bt_bg['direction'])}); imagens (n={s2['val_images']}) IC 95% [{_fmt_signed(bt_bi['ci_95_low'])}, {_fmt_signed(bt_bi['ci_95_high'])}]; média das 5 dobras={_fmt_signed(best_trained['mean_fold_delta_f1'])}±{_fmt(best_trained['sd_fold_delta_f1'])}; supera também o controle congelado (ΔF1=+0.0068, IC jogos [+0.0011, +0.0130]).",
+        f"6. Separabilidade OOF bola vs FP (ROC-AUC): `conf` do detector YOLO={_fmt(det_sep2['roc_auc'])}; jogadores congelado média/dobra={_fmt(frz_mean_auc)}; bola treinado layer3/4 média/dobra={_fmt(l34_mean_auc)} (melhor config fixa OOF={_fmt(best_fixed_l34_auc)} em `ctx3`)"
+        + (f"; todas camadas média/dobra={_fmt(all_mean_auc)} (colapsou no treino)." if all_mean_auc is not None else "."),
+        f"7. Rótulo ruidoso (`results/amostra_fp.png`, {fp_est['n_audited']} FPs em conf>=0.50): {fp_est['n_unannotated_real_balls']}/{fp_est['n_audited']} ({_fmt(fp_est['unannotated_ball_rate_strict']*100, 1)}%, IC Wilson [{_fmt(fp_est['unannotated_ball_rate_wilson_95'][0]*100, 1)}%, {_fmt(fp_est['unannotated_ball_rate_wilson_95'][1]*100, 1)}%]) são bolas extras não anotadas (+{fp_est['n_ambiguous']} duvidosos) e {len(fp_audit_report.get('near_or_dup_indices', []))}/{fp_est['n_audited']} (55,0%) são quase-acertos/duplicados da bola anotada; descontando bolas não anotadas, ΔF1 estimado={_fmt_signed(fp_strict['delta_f1_adjusted'])}. `soccernet_gsr_test_virgin` descartado como prova (caixas GT deslocadas).",
+        f"8. Viés e teto de ganho: `val.txt` não é teste virgem do detector (usado na escolha do checkpoint; comparação relativa justa, absolutos possivelmente otimistas); FP/img `train`={m_stats['train_fp_per_image_at_eval_conf']:.4f} vs `val`={base2['fp_per_image']:.4f}; headroom base em `val`={_fmt_signed(base2['headroom']['precision_headroom'])} em precisão e {_fmt_signed(base2['headroom']['f1_headroom'])} em F1; configurações testadas: Rodada 1={round1['protocol']['total_configs_tested']}, Rodada 2={p2['total_fixed_configs_tested']} fixas + {p2['total_nested_arm_selectors']} seletores CV aninhados.",
     ]
 
     lines: list[str] = [
@@ -130,7 +146,7 @@ def render_combined_report(
         "",
         "### Comparação OOF agregada dos braços (seleção aninhada de contexto, K, época e limiar por dobra)",
         "",
-        "| Braço | Precisão | Recall | F1 | mAP50 | mAP50-95 | FPs removidos | TPs removidos | ROC-AUC OOF | ΔF1 (IC 95% jogos) | ΔF1 (IC 95% imgs) | Média±DP (5 dobras) |",
+        "| Braço | Precisão | Recall | F1 | mAP50 | mAP50-95 | FPs removidos | TPs removidos | ROC-AUC (média 5 dobras) | ΔF1 (IC 95% jogos) | ΔF1 (IC 95% imgs) | Média±DP (5 dobras) |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         (
             f"| Detector sozinho (baseline) | {_fmt(base2['precision'])} | {_fmt(base2['recall'])} | "
@@ -138,6 +154,21 @@ def render_combined_report(
             f"0 / {base2['fp']} | 0 / {base2['tp']} | {_fmt(det_sep2['roc_auc'])} (`conf`) | 0.0000 | 0.0000 | 0.0000 |"
         ),
     ]
+
+    conf_cv = round2.get("yolo_conf_cv_reference")
+    if conf_cv is not None:
+        cm = conf_cv["pooled_oof_metrics"]
+        cc = conf_cv["pooled_oof_cost"]
+        cbg = conf_cv["bootstrap_group"]["delta_f1"]
+        cbi = conf_cv["bootstrap_image"]["delta_f1"]
+        lines.append(
+            f"| Referência: subir `conf` do YOLO (CV 5 dobras) | {_fmt(cm['precision'])} | {_fmt(cm['recall'])} | "
+            f"{_fmt(cm['f1'])} | {_fmt(cm['map50'])} | {_fmt(cm['map50_95'])} | "
+            f"{cc['fps_removed']} / {cc['base_fp']} | {cc['tps_removed']} / {cc['base_tp']} | {_fmt(det_sep2['roc_auc'])} | "
+            f"{_fmt_signed(cbg['point_estimate'])} [{_fmt_signed(cbg['ci_95_low'])}, {_fmt_signed(cbg['ci_95_high'])}] | "
+            f"[{_fmt_signed(cbi['ci_95_low'])}, {_fmt_signed(cbi['ci_95_high'])}] | "
+            f"{_fmt_signed(conf_cv['mean_fold_delta_f1'])} ± {_fmt(conf_cv['sd_fold_delta_f1'])} |"
+        )
 
     for arm_key in ("frozen_players", "trained_ball_layer34", "trained_ball_all_layers"):
         if arm_key not in nested:
@@ -147,10 +178,12 @@ def render_combined_report(
         ac = ar["pooled_oof_cost"]
         bg = ar["bootstrap_group"]["delta_f1"]
         bi = ar["bootstrap_image"]["delta_f1"]
+        f_aucs = [fl["fold_roc_auc"] for fl in ar["folds"] if fl.get("fold_roc_auc") is not None]
+        mean_auc = sum(f_aucs) / len(f_aucs) if f_aucs else ar["pooled_oof_roc_auc"]
         lines.append(
             f"| {_arm_label(arm_key)} | {_fmt(am['precision'])} | {_fmt(am['recall'])} | {_fmt(am['f1'])} | "
             f"{_fmt(am['map50'])} | {_fmt(am['map50_95'])} | {ac['fps_removed']} / {ac['base_fp']} | "
-            f"{ac['tps_removed']} / {ac['base_tp']} | {_fmt(ar['pooled_oof_roc_auc'])} | "
+            f"{ac['tps_removed']} / {ac['base_tp']} | {_fmt(mean_auc)} | "
             f"{_fmt_signed(bg['point_estimate'])} [{_fmt_signed(bg['ci_95_low'])}, {_fmt_signed(bg['ci_95_high'])}] | "
             f"[{_fmt_signed(bi['ci_95_low'])}, {_fmt_signed(bi['ci_95_high'])}] | "
             f"{_fmt_signed(ar['mean_fold_delta_f1'])} ± {_fmt(ar['sd_fold_delta_f1'])} |"
@@ -259,7 +292,7 @@ def render_combined_report(
             f"- Quebra programática de TODOS os `{round2.get('fp_overlap_breakdown', {}).get('total_fp', base2['fp'])}` FPs em `val.txt` (`conf >= 0.35`): `{round2.get('fp_overlap_breakdown', {}).get('duplicate_iou_ge_050', 0)}` duplicados (`IoU >= 0.50`), `{round2.get('fp_overlap_breakdown', {}).get('near_match_030_to_050', 0)}` quase-acerto (`0.30 <= IoU < 0.50`), `{round2.get('fp_overlap_breakdown', {}).get('near_match_010_to_030', 0)}` sobreposição parcial (`0.10 <= IoU < 0.30`), e `{round2.get('fp_overlap_breakdown', {}).get('far_iou_lt_010', 0)}` distantes do GT (`IoU < 0.10`).",
             f"- Notas da inspeção visual: {fp_audit_report['visual_notes']}",
             "",
-            "**Estimativa de métricas descontando bolas reais não anotadas** (estimativa baseada na amostra de 40 recortes; **nenhum rótulo original foi alterado**):",
+            "**Estimativa de métricas descontando bolas reais não anotadas** (estimativa conservadora baseada na amostra de 40 recortes, assumindo a mesma taxa entre FPs mantidos e removidos; **nenhum rótulo original foi alterado**):",
             "",
             "| Cenário (estimativa) | Precisão base | Recall base | F1 base | Precisão filtrada | Recall filtrado | F1 filtrado | ΔF1 estimado |",
             "|---|---:|---:|---:|---:|---:|---:|---:|",

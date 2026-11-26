@@ -85,6 +85,34 @@ Opções adicionais úteis:
 - `--group-map-json <arquivo.json>`: força partição 50/50 por jogo e adiciona bootstrap por jogo.
 - `--extra-dataset NOME=CAMINHO/data.yaml` ou `--extra-val-list NOME=CAMINHO/lista.txt`: avalia conjuntos extras com protótipos e limiares congelados.
 
+### Rodada 2 (CV aninhada de 5 dobras por jogo, contexto 2×/3×/4×, mineração no `train.txt` inteiro)
+
+```bash
+.venv/bin/python run_round2.py \
+  --data-yaml /Users/j.henrique/bola-fewshot-data/item488_t1b_v5_dataset_r5_9010/data.yaml \
+  --remap-prefix C:/Footlabs_Miguel_cache=/Users/j.henrique/bola-fewshot-data \
+  --group-map-json .tmp/r5_9010_group_map.json \
+  --detector-weights models/t1b_v5_etapa1_rodada1.pt \
+  --fewshot-weights /Users/j.henrique/four-reference-team-classifier/models/six-references.pth \
+  --imagenet-weights /Users/j.henrique/four-reference-team-classifier/data/inputs/resnet18.pth \
+  --imgsz 1920 \
+  --conf 0.35 \
+  --context-scales 2 3 4 \
+  --canvas 96x96 \
+  --k-values 1 6 \
+  --n-folds 5 \
+  --seed 42 \
+  --train-seed 25 \
+  --train-epochs 16 \
+  --train-steps-per-epoch 360 \
+  --train-mining-conf 0.05 \
+  --train-mining-imgsz 1280 \
+  --bootstrap-resamples 2000 \
+  --device mps \
+  --cache-dir .tmp/r2_cache \
+  --output-dir results
+```
+
 ## Testes
 
 ```bash
